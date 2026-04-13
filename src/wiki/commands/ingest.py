@@ -81,25 +81,21 @@ def run_ingest(path: str) -> None:
     console.print("The agent will present a plan first. Discuss, redirect, or approve.\n")
 
     # Kick off with the system suffix and ingest prompt
-    messages: list[dict] = [
+    initial_messages: list[dict] = [
         {"role": "system", "content": SYSTEM_SUFFIX},
         {"role": "user", "content": _build_ingest_prompt(path, word_count)},
     ]
 
     try:
         event_stream = agent.stream(
-            {"messages": messages},
+            {"messages": initial_messages},
             config=config,
             stream_mode="messages",
         )
         stream_agent_response(event_stream)
-
-        # Reconstruct from state
-        state = agent.get_state(config)
-        messages = list(state.values.get("messages", []))
         console.print()
 
-        # REPL loop
+        # REPL loop — only pass NEW messages; the checkpointer owns history
         while True:
             try:
                 user_input = input("You: ").strip()
@@ -118,18 +114,16 @@ def run_ingest(path: str) -> None:
             if user_input.lower() in ("go", "ok", "approve", "yes", "do it", "proceed", "looks good"):
                 user_input = "Plan approved. Proceed with the full ingestion now — create pages, update index.md, append to log.md, and commit."
 
-            messages.append({"role": "user", "content": user_input})
-
+            # Only send the new user message — the checkpointer already has
+            # the full history.  Re-injecting everything through add_messages
+            # causes state corruption on long sessions (duplicate / missing
+            # ToolMessages → API 400 "No tool output found").
             event_stream = agent.stream(
-                {"messages": messages},
+                {"messages": [{"role": "user", "content": user_input}]},
                 config=config,
                 stream_mode="messages",
             )
             stream_agent_response(event_stream)
-
-            # Reconstruct from state
-            state = agent.get_state(config)
-            messages = list(state.values.get("messages", []))
             console.print()
     finally:
         store.close()

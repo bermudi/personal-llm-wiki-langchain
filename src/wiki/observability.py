@@ -308,8 +308,17 @@ def create_observability_middleware(store: ObsStore, run_id: str) -> list:
             elapsed_ms = int((time.monotonic() - t0) * 1000)
 
             # Extract response data
-            # response is a ModelResponse — get the AIMessage from it
-            resp_msg = response.output if hasattr(response, "output") else response
+            # The handler returns ModelResponse with .result (list of AIMessages)
+            # NOT .output — that was a wrong guess.
+            resp_msg = None
+            if hasattr(response, "result") and response.result:
+                # result is a list of messages from _handle_model_output
+                for m in reversed(response.result):
+                    if isinstance(m, AIMessage):
+                        resp_msg = m
+                        break
+            if resp_msg is None and isinstance(response, AIMessage):
+                resp_msg = response
 
             resp_text = ""
             reasoning = None

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from langchain.agents.middleware import wrap_tool_call
+from langchain_core.messages import ToolMessage
 
 
 def validate_index(content: str) -> str | None:
@@ -122,34 +123,39 @@ def create_linter_middleware():
             except FileNotFoundError:
                 pass
 
-        # Execute the tool call
+        # Execute the tool call — handler returns a ToolMessage (per wrap_tool_call contract)
         result = handler(request)
 
-        # Check if the result indicates an error
-        if isinstance(result, str) and result.startswith("Error:"):
+        # If the tool already returned an error, pass it through
+        if isinstance(result, ToolMessage) and isinstance(result.content, str) and result.content.startswith("Error:"):
             return result
 
-        # Read the new content
+        # Read the new content to validate
         try:
             new_content = (Path.cwd() / path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return result
 
-        # Validate
+        # Validate — return a ToolMessage with the error so the agent can self-correct
+        tc_id = request.tool_call.get("id")
+
         if is_index:
             error = validate_index(new_content)
             if error:
-                # Revert to original content
-                if tool_name == "write_file":
-                    # We just wrote it — we can try to revert, but we don't have original
-                    # Instead, return error and let the agent fix it
-                    return f"VALIDATION ERROR: {error}"
-                return f"VALIDATION ERROR: {error}"
+                return ToolMessage(
+                    content=f"VALIDATION ERROR: {error}",
+                    tool_call_id=tc_id or "",
+                    name=tool_name,
+                )
 
         if is_log:
             error = validate_log(new_content, original_content)
             if error:
-                return f"VALIDATION ERROR: {error}"
+                return ToolMessage(
+                    content=f"VALIDATION ERROR: {error}",
+                    tool_call_id=tc_id or "",
+                    name=tool_name,
+                )
 
         return result
 
