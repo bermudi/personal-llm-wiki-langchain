@@ -8,9 +8,57 @@ from pathlib import Path
 from langchain_core.tools import tool
 
 
+def _content_to_str(content: str | list) -> str:
+    """Normalize model response content to a plain string."""
+    if isinstance(content, str):
+        return content
+    return "\n".join(
+        block["text"] if isinstance(block, dict) and "text" in block else str(block)
+        for block in content
+    )
+
+
 def _word_count(text: str) -> int:
     """Rough word count."""
     return len(text.split())
+
+
+# Patterns that indicate structural section breaks.
+# Order matters — first match wins.
+_SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("chapter", re.compile(r"^(?=Chapter \d+.*)", re.MULTILINE)),
+    ("heading", re.compile(r"^(?=#{1,3} \S)", re.MULTILINE)),
+    ("stanza", re.compile(r"^(?=\*\*\*)", re.MULTILINE)),
+]
+
+
+def _detect_sections(text: str) -> list[tuple[str, str]] | None:
+    """Detect structural sections in text.
+
+    Returns a list of (title, body) tuples if sections are found,
+    or None if no clear structure is detected (caller should fall
+    back to size-based splitting).
+    """
+    for kind, pattern in _SECTION_PATTERNS:
+        splits = pattern.split(text)
+        # pattern.split with a lookahead keeps the delimiter attached
+        # to the following segment, but the first element is preamble.
+        if len(splits) < 3:
+            continue  # need at least preamble + 2 sections
+
+        sections: list[tuple[str, str]] = []
+        for segment in splits:
+            segment = segment.strip()
+            if not segment:
+                continue
+            first_line = segment.split("\n", 1)[0].strip()
+            body = segment[len(first_line):].strip() if "\n" in segment else ""
+            sections.append((first_line, body))
+
+        if len(sections) >= 2:
+            return sections
+
+    return None
 
 
 def _split_at_boundaries(text: str, chunk_size: int) -> list[str]:
@@ -54,16 +102,19 @@ def _split_at_boundaries(text: str, chunk_size: int) -> list[str]:
 
 @tool
 def split_source(path: str, chunk_size: int = 5000) -> str:
-    """Split a long source document into size-bounded chunks.
+    """Split a long source document into chunks.
 
-    Chunks are split at natural boundaries (paragraphs, speaker turns).
+    Auto-detects structural sections (chapters, headings, stanzas).
+    If sections are found, each section becomes its own chunk.
+    Otherwise falls back to size-bounded splitting at paragraph boundaries.
+
     Each chunk is saved as a separate file in scratch/<source-slug>/chunk-NNN.md.
 
     Use this for sources over ~10,000 words. For shorter sources, process directly.
 
     Args:
         path: Path to the source file in raw/.
-        chunk_size: Target word count per chunk. Defaults to 5000.
+        chunk_size: Target word count per chunk (fallback only). Defaults to 5000.
     """
     source_path = Path.cwd() / path
     if not source_path.exists():
@@ -80,7 +131,14 @@ def split_source(path: str, chunk_size: int = 5000) -> str:
     chunk_dir = Path.cwd() / "scratch" / slug
     chunk_dir.mkdir(parents=True, exist_ok=True)
 
-    chunks = _split_at_boundaries(content, chunk_size)
+    # Try structural splitting first
+    sections = _detect_sections(content)
+    if sections:
+        chunks = [f"# {title}\n\n{body}" for title, body in sections if body.strip()]
+        method = f"by sections ({len(sections)} sections detected)"
+    else:
+        chunks = _split_at_boundaries(content, chunk_size)
+        method = f"by size ({chunk_size} words)"
 
     chunk_paths = []
     for i, chunk_text in enumerate(chunks, 1):
@@ -89,7 +147,7 @@ def split_source(path: str, chunk_size: int = 5000) -> str:
         chunk_paths.append(f"scratch/{slug}/chunk-{i:03d}.md")
 
     return (
-        f"Split {total_words} words into {len(chunks)} chunks:\n"
+        f"Split {total_words} words into {len(chunks)} chunks ({method}):\n"
         + "\n".join(chunk_paths)
     )
 
@@ -145,7 +203,7 @@ TEXT CHUNK:
 {content}
 """
     response = model.invoke(prompt)
-    extraction = response.content
+    extraction = _content_to_str(response.content)
 
     # Save the structured note back
     header = f"# Extraction: {resolved.name}\n\n"
@@ -198,7 +256,7 @@ Output format — for each group, output:
 {notes_text}
 """
     response = model.invoke(prompt)
-    return response.content
+    return _content_to_str(response.content)
 
 
 @tool
@@ -243,4 +301,4 @@ Output a complete wiki page in markdown format with:
 {''.join(notes)}
 """
     response = model.invoke(prompt)
-    return response.content
+    return _content_to_str(response.content)
