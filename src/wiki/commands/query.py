@@ -1,13 +1,17 @@
-"""wiki query — one-shot question."""
+"""wiki query — one-shot question with streaming and observability."""
 
 from __future__ import annotations
 
+import uuid
+
+from langgraph.checkpoint.memory import MemorySaver
 from rich.console import Console
-from rich.markdown import Markdown
 
 from wiki.agent import create_wiki_agent
 from wiki.config import validate_wiki_dir
 from wiki.middleware.linter import create_linter_middleware
+from wiki.observability import create_observability_middleware, init_run
+from wiki.streaming import stream_agent_response
 
 console = Console()
 
@@ -15,8 +19,18 @@ console = Console()
 def run_query(question: str) -> None:
     cwd = validate_wiki_dir()
 
+    thread_id = f"query-{uuid.uuid4().hex[:8]}"
+
+    # Observability
+    store, run_id = init_run("query", thread_id)
+    obs_middleware = create_observability_middleware(store, run_id)
+
     agent = create_wiki_agent(
-        middleware=[create_linter_middleware()],
+        checkpointer=MemorySaver(),
+        middleware=[
+            create_linter_middleware(),
+            *obs_middleware,
+        ],
     )
 
     prompt = f"""Answer this question using the wiki: {question}
@@ -32,10 +46,16 @@ Steps:
 Answer directly and cite your sources.
 """
 
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": prompt}]},
-        config={"recursion_limit": 15},
-    )
-
-    answer = result["messages"][-1].content
-    console.print(Markdown(answer))
+    try:
+        event_stream = agent.stream(
+            {"messages": [{"role": "user", "content": prompt}]},
+            config={
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": 15,
+            },
+            stream_mode="messages",
+        )
+        stream_agent_response(event_stream)
+        console.print()
+    finally:
+        store.close()

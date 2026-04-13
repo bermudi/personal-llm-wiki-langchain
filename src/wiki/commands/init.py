@@ -38,7 +38,7 @@ def run_init() -> None:
     # .gitignore
     gitignore_path = cwd / ".gitignore"
     if not gitignore_path.exists():
-        gitignore_path.write_text(".obsidian/\nwiki/.chroma/\n")
+        gitignore_path.write_text(".obsidian/\nwiki/.chroma/\n.wiki/\n")
 
     # git init if needed
     import subprocess

@@ -1,4 +1,4 @@
-"""wiki chat — interactive REPL."""
+"""wiki chat — interactive REPL with streaming and observability."""
 
 from __future__ import annotations
 
@@ -6,11 +6,12 @@ import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 from rich.console import Console
-from rich.markdown import Markdown
 
 from wiki.agent import create_wiki_agent
 from wiki.config import validate_wiki_dir
 from wiki.middleware.linter import create_linter_middleware
+from wiki.observability import create_observability_middleware, init_run
+from wiki.streaming import stream_agent_response
 
 console = Console()
 
@@ -19,11 +20,19 @@ def run_chat() -> None:
     cwd = validate_wiki_dir()
 
     thread_id = str(uuid.uuid4())
+
+    # Observability
+    store, run_id = init_run("chat", thread_id)
+    obs_middleware = create_observability_middleware(store, run_id)
+
     checkpointer = MemorySaver()
 
     agent = create_wiki_agent(
         checkpointer=checkpointer,
-        middleware=[create_linter_middleware()],
+        middleware=[
+            create_linter_middleware(),
+            *obs_middleware,
+        ],
     )
 
     config = {
@@ -36,33 +45,33 @@ def run_chat() -> None:
 
     messages: list[dict] = []
 
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Goodbye![/dim]")
-            break
-
-        if user_input.lower() in ("exit", "quit"):
-            console.print("[dim]Goodbye![/dim]")
-            break
-
-        if not user_input:
-            continue
-
-        messages.append({"role": "user", "content": user_input})
-
-        console.print("[dim]Thinking...[/dim]")
-        result = agent.invoke({"messages": messages}, config=config)
-        messages = result["messages"]
-
-        # The last message is the assistant's response
-        # Find the last AI message (skip tool messages)
-        response_text = ""
-        for msg in reversed(messages):
-            if hasattr(msg, "content") and hasattr(msg, "type") and msg.type == "ai":
-                response_text = msg.content
+    try:
+        while True:
+            try:
+                user_input = input("You: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Goodbye![/dim]")
                 break
 
-        console.print(Markdown(response_text))
-        console.print()
+            if user_input.lower() in ("exit", "quit"):
+                console.print("[dim]Goodbye![/dim]")
+                break
+
+            if not user_input:
+                continue
+
+            messages.append({"role": "user", "content": user_input})
+
+            event_stream = agent.stream(
+                {"messages": messages},
+                config=config,
+                stream_mode="messages",
+            )
+            stream_agent_response(event_stream)
+
+            # Reconstruct messages from latest agent state
+            state = agent.get_state(config)
+            messages = list(state.values.get("messages", []))
+            console.print()
+    finally:
+        store.close()

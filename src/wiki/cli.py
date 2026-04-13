@@ -22,16 +22,11 @@ def init() -> None:
 @app.command()
 def ingest(
     path: str = typer.Argument(help="Path to raw source file to ingest"),
-    approval: str = typer.Option(
-        "plan,commit",
-        "--approval",
-        help="Approval gates: plan, page, commit, none, or comma-separated combination.",
-    ),
 ) -> None:
-    """Ingest a raw source file into the wiki."""
+    """Ingest a raw source file into the wiki (interactive REPL)."""
     from wiki.commands.ingest import run_ingest
 
-    run_ingest(path, approval)
+    run_ingest(path)
 
 
 @app.command()

@@ -264,6 +264,112 @@ print("✓ test_agent_construction")
         shutil.rmtree(tmp)
 
 
+def test_observability_store():
+    """Verify ObsStore creates tables and inserts records."""
+    import tempfile
+    from wiki.observability import ObsStore
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / ".wiki" / "obs.db"
+        store = ObsStore(db_path)
+
+        # Insert a run
+        store.insert_run(run_id="test-run", thread_id="t1", command="chat", model="gpt-5.4-mini", reasoning_effort="xhigh")
+
+        # Insert a model call
+        store.insert_model_call(
+            run_id="test-run",
+            turn=1,
+            system_msg="You are a wiki agent.",
+            messages_in=[{"role": "user", "content": "hello"}],
+            tools_available=["read_file", "write_file"],
+            response="Hi there!",
+            reasoning="User said hello, I should respond.",
+            tool_calls=[{"name": "read_file", "args": {"path": "wiki/index.md"}, "id": "tc1"}],
+            usage={"input_tokens": 10, "output_tokens": 5},
+            duration_ms=1234,
+        )
+
+        # Insert a tool call
+        store.insert_tool_call(
+            run_id="test-run",
+            turn=1,
+            tool_call_id="tc1",
+            tool_name="read_file",
+            arguments={"path": "wiki/index.md"},
+            result="# Wiki Index",
+            duration_ms=50,
+        )
+
+        # Insert a message
+        store.insert_message(run_id="test-run", role="user", content="hello")
+        store.insert_message(run_id="test-run", role="assistant", content="Hi there!")
+
+        store.close()
+
+        # Verify with raw SQL
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+
+        runs = conn.execute("SELECT * FROM obs_runs").fetchall()
+        assert len(runs) == 1
+        assert runs[0][0] == "test-run"
+
+        model_calls = conn.execute("SELECT * FROM obs_model_calls").fetchall()
+        assert len(model_calls) == 1
+        assert model_calls[0][7] == "Hi there!"  # response
+        assert model_calls[0][8] == "User said hello, I should respond."  # reasoning
+        assert model_calls[0][11] == 1234  # duration_ms
+
+        tool_calls = conn.execute("SELECT * FROM obs_tool_calls").fetchall()
+        assert len(tool_calls) == 1
+        assert tool_calls[0][4] == "read_file"  # tool_name
+        assert tool_calls[0][-2] == 50  # duration_ms
+
+        messages = conn.execute("SELECT * FROM obs_messages ORDER BY id").fetchall()
+        assert len(messages) == 2
+        assert messages[0][2] == "user"
+        assert messages[1][2] == "assistant"
+
+        conn.close()
+        print("✓ test_observability_store")
+
+
+def test_observability_init_run():
+    """Verify init_run creates the DB and a run record."""
+    import tempfile
+    from wiki.observability import init_run
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Monkey-patch validate_wiki_dir and get_obs_db_path
+        import wiki.observability as obs_mod
+        original_fn = obs_mod.get_obs_db_path
+
+        def mock_get_obs_db_path(cwd=None):
+            p = Path(tmp) / ".wiki" / "obs.db"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            return p
+
+        obs_mod.get_obs_db_path = mock_get_obs_db_path
+        try:
+            store, run_id = init_run("ingest", "thread-123")
+            assert len(run_id) == 32  # uuid hex
+
+            # Verify run was inserted
+            import sqlite3
+            conn = sqlite3.connect(str(mock_get_obs_db_path()))
+            runs = conn.execute("SELECT command, thread_id FROM obs_runs").fetchall()
+            assert len(runs) == 1
+            assert runs[0][0] == "ingest"
+            assert runs[0][1] == "thread-123"
+            conn.close()
+
+            store.close()
+            print("✓ test_observability_init_run")
+        finally:
+            obs_mod.get_obs_db_path = original_fn
+
+
 if __name__ == "__main__":
     print("Running wiki CLI tests...\n")
     test_init_creates_structure()
@@ -274,4 +380,6 @@ if __name__ == "__main__":
     test_linter_middleware()
     test_chunking_split()
     test_agent_construction()
+    test_observability_store()
+    test_observability_init_run()
     print("\nAll tests passed!")
