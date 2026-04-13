@@ -13,11 +13,12 @@ WIKI_DIRS = ("raw", "wiki", "scratch")
 
 # Chat provider (Poe by default — uses your subscription credits)
 DEFAULT_CHAT_BASE_URL = "https://api.poe.com/v1"
-DEFAULT_CHAT_MODEL = "gpt-4.1-mini"
+DEFAULT_CHAT_MODEL = "gpt-5.4-mini"
+DEFAULT_REASONING_EFFORT = "low"
 
 # Embedding provider (OpenRouter by default — cheap pay-as-you-go)
 DEFAULT_EMBED_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_EMBED_MODEL = "openai/text-embedding-3-small"
+DEFAULT_EMBED_MODEL = "perplexity/pplx-embed-v1-4b"
 
 
 def require_chat_api_key() -> str:
@@ -54,13 +55,56 @@ def get_embedding_model() -> str:
     return os.environ.get("WIKI_EMBED_MODEL", DEFAULT_EMBED_MODEL)
 
 
+def get_reasoning_effort() -> str | None:
+    val = os.environ.get("WIKI_REASONING_EFFORT")
+    # Empty string means "no reasoning" (explicit override to disable)
+    if val == "" or val == "none":
+        return None
+    return val if val is not None else DEFAULT_REASONING_EFFORT
+
+
+def get_use_responses_api() -> bool:
+    """Whether to use the Responses API instead of Chat Completions.
+
+    Defaults to False because langchain-openai's Responses API mode has a bug
+    in multi-turn tool conversations (duplicates function_call items in the
+    input array).  The raw OpenAI SDK against Poe works fine — the bug is in
+    how langchain-openai reconstructs the input array from AIMessage state.
+
+    Set WIKI_USE_RESPONSES_API=true to opt in (e.g. for reasoning tokens
+    with a provider that fixes the langchain-openai issue or isn't Poe).
+    """
+    val = os.environ.get("WIKI_USE_RESPONSES_API", "").lower()
+    return val in ("1", "true", "yes")
+
+
 def build_model() -> ChatOpenAI:
-    """Build a ChatOpenAI instance for the chat provider."""
-    return ChatOpenAI(
-        model=get_model_name(),
-        base_url=get_chat_base_url(),
-        api_key=require_chat_api_key(),
-    )
+    """Build a ChatOpenAI instance for the chat provider.
+
+    Uses Chat Completions (POST /v1/chat/completions) by default — the most
+    reliable path through Poe with zero platform gaps (system messages,
+    tools, multi-turn, streaming all confirmed).
+
+    Reasoning effort is passed through on both paths:
+      - Chat Completions → reasoning_effort param (official OpenAI field)
+      - Responses API   → reasoning.effort + summary (structured)
+    Note: Chat Completions does not stream reasoning tokens back, but the
+    model still uses the effort level internally.
+    """
+    use_responses = get_use_responses_api()
+    kwargs: dict = {
+        "model": get_model_name(),
+        "base_url": get_chat_base_url(),
+        "api_key": require_chat_api_key(),
+        "use_responses_api": use_responses,
+    }
+    effort = get_reasoning_effort()
+    if effort:
+        if use_responses:
+            kwargs["reasoning"] = {"effort": effort, "summary": "auto"}
+        else:
+            kwargs["reasoning_effort"] = effort
+    return ChatOpenAI(**kwargs)
 
 
 def validate_wiki_dir() -> Path:

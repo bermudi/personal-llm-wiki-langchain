@@ -29,9 +29,11 @@ POE_API_KEY           # Chat completions — uses your Poe subscription credits
 OPENROUTER_API_KEY    # Embeddings — cheap pay-as-you-go (~$0.02/1M tokens)
 
 # Optional overrides
-WIKI_MODEL            # Default: gpt-4.1-mini
+WIKI_MODEL            # Default: gpt-5.4-mini
 WIKI_CHAT_BASE_URL    # Default: https://api.poe.com/v1
-WIKI_EMBED_MODEL      # Default: openai/text-embedding-3-small
+WIKI_EMBED_MODEL      # Default: perplexity/pplx-embed-v1-4b
 WIKI_EMBED_BASE_URL   # Default: https://openrouter.ai/api/v1
+WIKI_REASONING_EFFORT # Default: low
+WIKI_USE_RESPONSES_API # Default: false (Responses API breaks multi-turn tool calls on Poe)
 ```
 
