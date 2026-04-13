@@ -39,14 +39,13 @@ def run_ingest(path: str, approval: str) -> None:
     middleware = [create_linter_middleware()]
 
     # Determine which tools need HITL interrupts
-    if gates:
-        interrupt_on = {}
-        if "commit" in gates:
-            interrupt_on["git_commit"] = {"allowed_decisions": ["approve", "reject"]}
-        if gates:
-            middleware.append(
-                HumanInTheLoopMiddleware(interrupt_on=interrupt_on) if interrupt_on else None
-            )
+    interrupt_on = {}
+    if "page" in gates:
+        interrupt_on["write_file"] = {"allowed_decisions": ["approve", "reject"]}
+    if "commit" in gates:
+        interrupt_on["git_commit"] = {"allowed_decisions": ["approve", "reject"]}
+    if interrupt_on:
+        middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
     middleware = [m for m in middleware if m is not None]
 
     # Create agent with checkpointer (needed for HITL interrupts)
