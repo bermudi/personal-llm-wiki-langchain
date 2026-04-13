@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Wiki runtime
+.obsidian/
+wiki/.chroma/
+
+# Embeddings (derived)
+*.egg-info/
+langchain-skills/
