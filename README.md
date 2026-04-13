@@ -5,9 +5,9 @@ A personal knowledge base maintained by an AI agent. Drop raw sources into `raw/
 ## Quick Start
 
 ```bash
-# Set up your API key (OpenRouter preferred, Poe also works)
-export OPENROUTER_API_KEY=sk-or-v1-your-key
-# OR: export POE_API_KEY=poe-xxxxx-your-key
+# Set up API keys (both required)
+export POE_API_KEY=poe-xxxxx-your-key           # Chat — uses your subscription credits
+export OPENROUTER_API_KEY=sk-or-v1-your-key     # Embeddings — cheap pay-as-you-go
 
 # Initialize a wiki workspace
 mkdir my-wiki && cd my-wiki
@@ -40,8 +40,8 @@ uv run wiki reindex
 ## Architecture
 
 - **Agent**: LangChain `create_agent()` with 13 tools and moderate system prompt
-- **Model**: Default `openai/gpt-4.1-mini` via OpenRouter (set `WIKI_MODEL` to override, `WIKI_BASE_URL` for custom provider)
-- **Embeddings**: `openai/text-embedding-3-small` via same OpenRouter endpoint (set `WIKI_EMBEDDING_MODEL` to override)
+- **Chat model**: Default `gpt-4.1-mini` via Poe (set `WIKI_MODEL` / `WIKI_CHAT_BASE_URL` to override)
+- **Embeddings**: `openai/text-embedding-3-small` via OpenRouter (set `WIKI_EMBED_MODEL` / `WIKI_EMBED_BASE_URL` to override)
 - **RAG**: Chroma vector store for semantic page discovery
 - **Chunking**: Pipeline tools for long sources (split → extract → group → synthesize)
 - **Validation**: Middleware linter for index.md and log.md format

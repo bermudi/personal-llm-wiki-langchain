@@ -9,7 +9,8 @@ This change rebuilds the wiki as a Python CLI tool powered by LangChain. The key
 - **CLI entry point** (`uv run wiki`): `init`, `ingest`, `query`, `chat`, and `reindex` subcommands using `typer`
 - **Wiki detection**: tool validates `raw/`, `wiki/`, `scratch/` exist in `cwd`; errors clearly if not
 - **Agent construction**: `create_agent()` from LangChain with a moderate system prompt (three-layer architecture, git convention, chunking guidance, citation and filing guidance)
-- **Model configuration**: default `openai/gpt-4.1-mini` via OpenRouter API (`base_url=https://openrouter.ai/api/v1`, auth via `OPENROUTER_API_KEY` env var), overridable with `WIKI_MODEL` env var. OpenRouter provides both chat completions and embeddings through a single OpenAI-compatible endpoint.
+- **Chat model**: default `gpt-4.1-mini` via Poe API (`base_url=https://api.poe.com/v1`, auth via `POE_API_KEY`), overridable with `WIKI_MODEL`. Uses Poe subscription credits for the expensive chat calls.
+- **Embeddings**: default `openai/text-embedding-3-small` via OpenRouter (`base_url=https://openrouter.ai/api/v1`, auth via `OPENROUTER_API_KEY`), overridable with `WIKI_EMBED_MODEL`. Embeddings are cheap pay-as-you-go (~$0.02/1M tokens). Two separate providers keeps costs on the right billing surface.
 - **Tool inventory**: filesystem tools (`read_file`, `write_file`, `edit_file`, `list_files`, `search_files`), git tools (`git_status`, `git_commit`, `git_log`), chunking pipeline tools (`split_source`, `extract_chunk`, `group_chunks`, `synthesize_group`)
 - **Middleware**: index/log format linter that validates structure immediately after any `write_file` touching `wiki/index.md` or `wiki/log.md`
 - **`init` command**: creates `raw/`, `wiki/`, `scratch/`, `wiki/index.md`, `wiki/log.md`, `.gitignore`; makes initial git commit; no interactive grill-me

@@ -32,16 +32,32 @@ The tool SHALL be structured as a Python package with `pyproject.toml` for depen
 
 ### Requirement: Model Configuration
 
-The agent SHALL default to `openai/gpt-4.1-mini` as the model, connecting via OpenRouter API at `base_url=https://openrouter.ai/api/v1` using the `OPENROUTER_API_KEY` environment variable (falls back to `POE_API_KEY`). The model SHALL be overridable via the `WIKI_MODEL` environment variable. The base URL SHALL be overridable via `WIKI_BASE_URL`. The tool SHALL exit with a clear error if no API key is set.
+The agent SHALL use two separate providers for chat and embeddings.
 
-#### Scenario: Default model
-- **WHEN** no `WIKI_MODEL` env var is set
-- **THEN** the agent uses `openai/gpt-4.1-mini` via OpenRouter
+**Chat provider** (expensive, uses subscription credits):
+- Default model: `gpt-4.1-mini` via Poe API at `https://api.poe.com/v1`
+- Auth: `POE_API_KEY` environment variable (required)
+- Override: `WIKI_MODEL` and `WIKI_CHAT_BASE_URL` env vars
 
-#### Scenario: Custom model
+**Embedding provider** (cheap, pay-as-you-go):
+- Default model: `openai/text-embedding-3-small` via OpenRouter at `https://openrouter.ai/api/v1`
+- Auth: `OPENROUTER_API_KEY` environment variable (required)
+- Override: `WIKI_EMBED_MODEL` and `WIKI_EMBED_BASE_URL` env vars
+
+The tool SHALL exit with a clear error if either key is missing when its provider is needed.
+
+#### Scenario: Default configuration
+- **WHEN** no env vars are set except `POE_API_KEY` and `OPENROUTER_API_KEY`
+- **THEN** chat uses `gpt-4.1-mini` via Poe, embeddings use `openai/text-embedding-3-small` via OpenRouter
+
+#### Scenario: Custom chat model
 - **WHEN** `WIKI_MODEL=anthropic/claude-sonnet-4` is set
-- **THEN** the agent uses that model instead
+- **THEN** the agent uses that model via Poe
 
-#### Scenario: Missing API key
-- **WHEN** neither `OPENROUTER_API_KEY` nor `POE_API_KEY` is set
-- **THEN** the tool prints "OPENROUTER_API_KEY (or POE_API_KEY) environment variable is required" and exits with code 1
+#### Scenario: Missing Poe key
+- **WHEN** `POE_API_KEY` is not set and chat is needed
+- **THEN** prints error and exits with code 1
+
+#### Scenario: Missing OpenRouter key
+- **WHEN** `OPENROUTER_API_KEY` is not set and embeddings are needed
+- **THEN** prints error and exits with code 1

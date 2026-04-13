@@ -43,10 +43,10 @@ personal-llm-wiki-langchain/
 
 ## Decisions
 
-### OpenRouter as unified provider
-- **Chosen:** Route all LLM calls (chat completions AND embeddings) through OpenRouter API (`openrouter.ai/api/v1`) using OpenAI-compatible endpoints
-- **Why:** Single API key handles both chat and embeddings. Poe doesn't offer embeddings. OpenRouter has 300+ models, OpenAI-compatible API, and the same `ChatOpenAI(base_url=..., api_key=...)` pattern works for both `ChatOpenAI` and `OpenAIEmbeddings` from `langchain-openai`
-- **Trade-off:** Requires an OpenRouter account and API key. Falls back to `POE_API_KEY` for backward compatibility. Acceptable for a personal tool
+### Split providers: Poe for chat, OpenRouter for embeddings
+- **Chosen:** Route chat completions through Poe (subscription credits) and embeddings through OpenRouter (pay-as-you-go)
+- **Why:** Chat is expensive — use the Poe subscription you're already paying for. Embeddings are ~$0.02/1M tokens — pocket change on OpenRouter. Poe doesn't offer embeddings at all. Both use the same `ChatOpenAI`/`OpenAIEmbeddings` from `langchain-openai`, just different `base_url` and `api_key`
+- **Trade-off:** Two API keys to manage. Acceptable since they serve different purposes and you're already paying for both
 
 ### Chroma over FAISS for vector store
 - **Chosen:** Chroma as the embedded vector store
@@ -99,7 +99,10 @@ Agent construction: `create_agent()` with model from config, full tool inventory
 Relates to: Project Structure (Model Configuration), Agent Tools (all requirements)
 
 ### `src/wiki/config.py` — create
-Environment variable loading: `OPENROUTER_API_KEY` (preferred) / `POE_API_KEY` (fallback, required), `WIKI_MODEL` (optional, default `openai/gpt-4.1-mini`), `WIKI_BASE_URL` (optional, default `https://openrouter.ai/api/v1`), `WIKI_EMBEDDING_MODEL` (optional, default `openai/text-embedding-3-small`). Wiki directory validation function. Model instance construction using `ChatOpenAI(base_url=..., api_key=...)`.
+Two separate provider configs:
+- **Chat**: `POE_API_KEY` (required), `WIKI_MODEL` (default `gpt-4.1-mini`), `WIKI_CHAT_BASE_URL` (default `https://api.poe.com/v1`)
+- **Embeddings**: `OPENROUTER_API_KEY` (required), `WIKI_EMBED_MODEL` (default `openai/text-embedding-3-small`), `WIKI_EMBED_BASE_URL` (default `https://openrouter.ai/api/v1`)
+Wiki directory validation function. Model instance construction using `ChatOpenAI(base_url=..., api_key=...)`.
 
 Relates to: Project Structure (Model Configuration)
 
