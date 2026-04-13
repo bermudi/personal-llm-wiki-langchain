@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -10,13 +9,15 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 
+from wiki.config import get_base_url, get_embedding_model, require_api_key
+
 
 def _get_embeddings() -> OpenAIEmbeddings:
-    """Create embeddings instance configured for Poe API."""
+    """Create embeddings instance using the configured provider."""
     return OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        base_url="https://api.poe.com/v1",
-        api_key=os.environ.get("POE_API_KEY", ""),
+        model=get_embedding_model(),
+        base_url=get_base_url(),
+        api_key=require_api_key(),
     )
 
 

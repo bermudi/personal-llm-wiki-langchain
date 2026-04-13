@@ -9,7 +9,7 @@ This change rebuilds the wiki as a Python CLI tool powered by LangChain. The key
 - **CLI entry point** (`uv run wiki`): `init`, `ingest`, `query`, `chat`, and `reindex` subcommands using `typer`
 - **Wiki detection**: tool validates `raw/`, `wiki/`, `scratch/` exist in `cwd`; errors clearly if not
 - **Agent construction**: `create_agent()` from LangChain with a moderate system prompt (three-layer architecture, git convention, chunking guidance, citation and filing guidance)
-- **Model configuration**: default `gpt-5.4` via Poe API (`base_url=https://api.poe.com/v1`, auth via `POE_API_KEY` env var), overridable with `WIKI_MODEL` env var
+- **Model configuration**: default `openai/gpt-4.1-mini` via OpenRouter API (`base_url=https://openrouter.ai/api/v1`, auth via `OPENROUTER_API_KEY` env var), overridable with `WIKI_MODEL` env var. OpenRouter provides both chat completions and embeddings through a single OpenAI-compatible endpoint.
 - **Tool inventory**: filesystem tools (`read_file`, `write_file`, `edit_file`, `list_files`, `search_files`), git tools (`git_status`, `git_commit`, `git_log`), chunking pipeline tools (`split_source`, `extract_chunk`, `group_chunks`, `synthesize_group`)
 - **Middleware**: index/log format linter that validates structure immediately after any `write_file` touching `wiki/index.md` or `wiki/log.md`
 - **`init` command**: creates `raw/`, `wiki/`, `scratch/`, `wiki/index.md`, `wiki/log.md`, `.gitignore`; makes initial git commit; no interactive grill-me

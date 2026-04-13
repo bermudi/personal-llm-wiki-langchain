@@ -32,16 +32,16 @@ The tool SHALL be structured as a Python package with `pyproject.toml` for depen
 
 ### Requirement: Model Configuration
 
-The agent SHALL default to `gpt-5.4` as the model, connecting via Poe API at `base_url=https://api.poe.com/v1` using the `POE_API_KEY` environment variable. The model SHALL be overridable via the `WIKI_MODEL` environment variable. The tool SHALL exit with a clear error if `POE_API_KEY` is not set.
+The agent SHALL default to `openai/gpt-4.1-mini` as the model, connecting via OpenRouter API at `base_url=https://openrouter.ai/api/v1` using the `OPENROUTER_API_KEY` environment variable (falls back to `POE_API_KEY`). The model SHALL be overridable via the `WIKI_MODEL` environment variable. The base URL SHALL be overridable via `WIKI_BASE_URL`. The tool SHALL exit with a clear error if no API key is set.
 
 #### Scenario: Default model
 - **WHEN** no `WIKI_MODEL` env var is set
-- **THEN** the agent uses `gpt-5.4` via Poe
+- **THEN** the agent uses `openai/gpt-4.1-mini` via OpenRouter
 
 #### Scenario: Custom model
-- **WHEN** `WIKI_MODEL=anthropic:claude-sonnet-4-5` is set
+- **WHEN** `WIKI_MODEL=anthropic/claude-sonnet-4` is set
 - **THEN** the agent uses that model instead
 
 #### Scenario: Missing API key
-- **WHEN** `POE_API_KEY` is not set
-- **THEN** the tool prints "POE_API_KEY environment variable is required" and exits with code 1
+- **WHEN** neither `OPENROUTER_API_KEY` nor `POE_API_KEY` is set
+- **THEN** the tool prints "OPENROUTER_API_KEY (or POE_API_KEY) environment variable is required" and exits with code 1

@@ -25,6 +25,13 @@ This project uses skills that contain up-to-date patterns and working reference 
 
 Required environment variables:
 ```bash
-POE_API_KEY
+OPENROUTER_API_KEY   # Preferred — works for both chat and embeddings
+# OR
+POE_API_KEY          # Fallback — chat only, no embeddings
+
+# Optional overrides
+WIKI_MODEL           # Default: openai/gpt-4.1-mini
+WIKI_EMBEDDING_MODEL # Default: openai/text-embedding-3-small
+WIKI_BASE_URL        # Default: https://openrouter.ai/api/v1
 ```
 

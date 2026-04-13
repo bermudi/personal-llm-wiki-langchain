@@ -43,10 +43,10 @@ personal-llm-wiki-langchain/
 
 ## Decisions
 
-### Poe as unified model provider
-- **Chosen:** Route all LLM calls through Poe API (`api.poe.com/v1`) using OpenAI-compatible chat completions
-- **Why:** Single API key, access to many models, user already has a Poe subscription. The OpenAI-compatible endpoint means we use `ChatOpenAI(base_url=..., api_key=...)` from LangChain with no custom provider code
-- **Trade-off:** Locked into Poe's model availability and rate limits. If Poe goes down, the tool is down. Acceptable for a personal tool
+### OpenRouter as unified provider
+- **Chosen:** Route all LLM calls (chat completions AND embeddings) through OpenRouter API (`openrouter.ai/api/v1`) using OpenAI-compatible endpoints
+- **Why:** Single API key handles both chat and embeddings. Poe doesn't offer embeddings. OpenRouter has 300+ models, OpenAI-compatible API, and the same `ChatOpenAI(base_url=..., api_key=...)` pattern works for both `ChatOpenAI` and `OpenAIEmbeddings` from `langchain-openai`
+- **Trade-off:** Requires an OpenRouter account and API key. Falls back to `POE_API_KEY` for backward compatibility. Acceptable for a personal tool
 
 ### Chroma over FAISS for vector store
 - **Chosen:** Chroma as the embedded vector store
@@ -99,7 +99,7 @@ Agent construction: `create_agent()` with model from config, full tool inventory
 Relates to: Project Structure (Model Configuration), Agent Tools (all requirements)
 
 ### `src/wiki/config.py` — create
-Environment variable loading: `POE_API_KEY` (required), `WIKI_MODEL` (optional, default `gpt-5.4`). Wiki directory validation function. Model instance construction using `ChatOpenAI(base_url="https://api.poe.com/v1", ...)`.
+Environment variable loading: `OPENROUTER_API_KEY` (preferred) / `POE_API_KEY` (fallback, required), `WIKI_MODEL` (optional, default `openai/gpt-4.1-mini`), `WIKI_BASE_URL` (optional, default `https://openrouter.ai/api/v1`), `WIKI_EMBEDDING_MODEL` (optional, default `openai/text-embedding-3-small`). Wiki directory validation function. Model instance construction using `ChatOpenAI(base_url=..., api_key=...)`.
 
 Relates to: Project Structure (Model Configuration)
 
