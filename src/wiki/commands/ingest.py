@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from wiki.agent import create_wiki_agent
-from wiki.config import validate_wiki_dir
+from wiki.config import get_model_name, validate_wiki_dir
 from wiki.middleware.linter import create_linter_middleware
 from wiki.observability import create_observability_middleware, init_run
 from wiki.streaming import stream_agent_response
@@ -39,7 +39,14 @@ The source is {word_count} words long. {'It is long enough to benefit from chunk
 Start by reading the source and wiki/index.md, then present your plan. Do NOT make any changes yet — describe what pages you plan to create/update and why."""
 
 
-def run_ingest(path: str) -> None:
+# Shortcut map for ingest approval phrases
+_INGEST_SHORTCUTS = {
+    phrase: "Plan approved. Proceed with the full ingestion now — create pages, update index.md, append to log.md, and commit."
+    for phrase in ("go", "ok", "approve", "yes", "do it", "proceed", "looks good")
+}
+
+
+def run_ingest(path: str, *, no_tui: bool = False) -> None:
     cwd = validate_wiki_dir()
 
     source_path = Path(path)
@@ -73,20 +80,32 @@ def run_ingest(path: str) -> None:
         "recursion_limit": 100,
     }
 
-    console.print(Panel(
-        f"Ingesting [bold]{path}[/bold] ({word_count} words)",
-        title="Wiki Ingest",
-        border_style="cyan",
-    ))
-    console.print("The agent will present a plan first. Discuss, redirect, or approve.\n")
-
-    # Kick off with the system suffix and ingest prompt
     initial_messages: list[dict] = [
         {"role": "system", "content": SYSTEM_SUFFIX},
         {"role": "user", "content": _build_ingest_prompt(path, word_count)},
     ]
 
     try:
+        if not no_tui:
+            from wiki.tui import run_tui_ingest
+
+            run_tui_ingest(
+                agent,
+                config,
+                initial_messages,
+                model_name=get_model_name(),
+                shortcuts=_INGEST_SHORTCUTS,
+            )
+            return
+
+        # ── Plain fallback ──────────────────────────────────────────
+        console.print(Panel(
+            f"Ingesting [bold]{path}[/bold] ({word_count} words)",
+            title="Wiki Ingest",
+            border_style="cyan",
+        ))
+        console.print("The agent will present a plan first. Discuss, redirect, or approve.\n")
+
         event_stream = agent.stream(
             {"messages": initial_messages},
             config=config,
@@ -114,10 +133,6 @@ def run_ingest(path: str) -> None:
             if user_input.lower() in ("go", "ok", "approve", "yes", "do it", "proceed", "looks good"):
                 user_input = "Plan approved. Proceed with the full ingestion now — create pages, update index.md, append to log.md, and commit."
 
-            # Only send the new user message — the checkpointer already has
-            # the full history.  Re-injecting everything through add_messages
-            # causes state corruption on long sessions (duplicate / missing
-            # ToolMessages → API 400 "No tool output found").
             event_stream = agent.stream(
                 {"messages": [{"role": "user", "content": user_input}]},
                 config=config,

@@ -22,11 +22,12 @@ def init() -> None:
 @app.command()
 def ingest(
     path: str = typer.Argument(help="Path to raw source file to ingest"),
+    no_tui: bool = typer.Option(False, "--no-tui", help="Use plain text mode instead of TUI"),
 ) -> None:
     """Ingest a raw source file into the wiki (interactive REPL)."""
     from wiki.commands.ingest import run_ingest
 
-    run_ingest(path)
+    run_ingest(path, no_tui=no_tui)
 
 
 @app.command()
@@ -40,11 +41,13 @@ def query(
 
 
 @app.command()
-def chat() -> None:
+def chat(
+    no_tui: bool = typer.Option(False, "--no-tui", help="Use plain text mode instead of TUI"),
+) -> None:
     """Open an interactive chat session with the wiki."""
     from wiki.commands.chat import run_chat
 
-    run_chat()
+    run_chat(no_tui=no_tui)
 
 
 @app.command()

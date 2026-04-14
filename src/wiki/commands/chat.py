@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from rich.console import Console
 
 from wiki.agent import create_wiki_agent
-from wiki.config import validate_wiki_dir
+from wiki.config import get_model_name, validate_wiki_dir
 from wiki.middleware.linter import create_linter_middleware
 from wiki.observability import create_observability_middleware, init_run
 from wiki.streaming import stream_agent_response
@@ -16,7 +16,7 @@ from wiki.streaming import stream_agent_response
 console = Console()
 
 
-def run_chat() -> None:
+def run_chat(*, no_tui: bool = False) -> None:
     cwd = validate_wiki_dir()
 
     thread_id = str(uuid.uuid4())
@@ -40,12 +40,19 @@ def run_chat() -> None:
         "recursion_limit": 15,
     }
 
-    console.print("[bold cyan]Wiki Chat[/bold cyan]")
-    console.print("Ask questions about your wiki. Type [bold]exit[/bold] or press [bold]Ctrl-D[/bold] to quit.\n")
-
-    messages: list[dict] = []
-
     try:
+        if not no_tui:
+            from wiki.tui import run_tui_chat
+
+            run_tui_chat(agent, config, model_name=get_model_name())
+            return
+
+        # ── Plain fallback ──────────────────────────────────────────
+        console.print("[bold cyan]Wiki Chat[/bold cyan]")
+        console.print("Ask questions about your wiki. Type [bold]exit[/bold] or press [bold]Ctrl-D[/bold] to quit.\n")
+
+        messages: list[dict] = []
+
         while True:
             try:
                 user_input = input("You: ").strip()
