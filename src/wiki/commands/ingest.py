@@ -34,6 +34,12 @@ Behavior:
 LONG_SOURCE_WORD_THRESHOLD = 70_000  # ~100k tokens
 
 
+def build_ingest_prompt(path: str, word_count: int) -> str:
+    """Build a short-source ingest prompt by reading the file from disk."""
+    content = (Path.cwd() / path).read_text(encoding="utf-8")
+    return _build_short_prompt(path, content, word_count)
+
+
 def _build_short_prompt(path: str, content: str, word_count: int) -> str:
     """Prompt for sources that fit in a single context window."""
     return (
