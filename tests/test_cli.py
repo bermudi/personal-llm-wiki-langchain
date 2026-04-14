@@ -629,6 +629,123 @@ def test_observability_init_run():
             obs_mod.get_obs_db_path = original_fn
 
 
+def test_observable_embeddings():
+    """Verify ObservableEmbeddings logs embed_documents and embed_query to SQLite."""
+    import sqlite3
+    import tempfile
+    from wiki.observability import ObsStore, ObservableEmbeddings
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "obs.db"
+        store = ObsStore(db_path)
+        store.insert_run(run_id="emb-test", thread_id="t1", command="test", model="embed", reasoning_effort=None)
+
+        class FakeInner:
+            def embed_documents(self, texts):
+                return [[1.0, 0.0]] * len(texts)
+            def embed_query(self, text):
+                return [0.5, 0.5]
+
+        obs_emb = ObservableEmbeddings(FakeInner(), obs_store=store, run_id="emb-test")
+
+        # embed_documents
+        vecs = obs_emb.embed_documents(["hello", "world"])
+        assert len(vecs) == 2
+        assert vecs[0] == [1.0, 0.0]
+
+        # embed_query
+        qvec = obs_emb.embed_query("test query")
+        assert qvec == [0.5, 0.5]
+
+        store.close()
+
+        # Verify DB
+        conn = sqlite3.connect(str(db_path))
+        tool_calls = conn.execute("SELECT tool_name, arguments, duration_ms FROM obs_tool_calls ORDER BY id").fetchall()
+        assert len(tool_calls) == 2
+        assert tool_calls[0][0] == "embed_documents"
+        assert tool_calls[1][0] == "embed_query"
+        conn.close()
+        print("✓ test_observable_embeddings")
+
+
+def test_observable_embeddings_passthrough():
+    """ObservableEmbeddings with no obs_store should pass through transparently."""
+    from wiki.observability import ObservableEmbeddings
+
+    class FakeInner:
+        def embed_documents(self, texts):
+            return [[1.0]] * len(texts)
+        def embed_query(self, text):
+            return [0.5]
+        custom_attr = "present"
+
+    obs_emb = ObservableEmbeddings(FakeInner())
+    assert obs_emb.embed_documents(["a"]) == [[1.0]]
+    assert obs_emb.embed_query("q") == [0.5]
+    assert obs_emb.custom_attr == "present"
+    print("✓ test_observable_embeddings_passthrough")
+
+
+def test_reindex_observability():
+    """Verify wiki reindex logs embedding calls to SQLite."""
+    import sqlite3
+
+    tmp = fresh_wiki()
+    try:
+        # Create some wiki pages to index
+        wiki_dir = tmp / "wiki"
+        (wiki_dir / "trust.md").write_text("# Trust\nTrust is important.", encoding="utf-8")
+        (wiki_dir / "power.md").write_text("# Power\nPower dynamics.", encoding="utf-8")
+
+        script = f"""
+import sys
+sys.path.insert(0, \"{PROJECT_DIR / "src"}\")
+from wiki.observability import init_run, ObsStore, ObservableEmbeddings
+from wiki.rag.chroma_store import reindex_all
+from pathlib import Path
+import unittest.mock as mock
+
+# Fake embeddings so we don't need a real API key
+class FakeEmbeddings:
+    def embed_documents(self, texts):
+        return [[1.0, 0.0]] * len(texts)
+    def embed_query(self, text):
+        return [0.5, 0.5]
+
+fake = FakeEmbeddings()
+with mock.patch(\"wiki.rag.chroma_store.build_embeddings\", return_value=fake):
+    store, run_id = init_run(\"reindex\", \"test-reindex\")
+    count = reindex_all(obs_store=store, run_id=run_id)
+    store.close()
+print(f\"indexed={{count}} run={{run_id}}\")
+"""
+        result = subprocess.run(
+            ["uv", "run", "--project", str(PROJECT_DIR), "python", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=tmp,
+        )
+        assert result.returncode == 0, f"Reindex failed: {result.stderr}"
+        assert "indexed=2" in result.stdout
+
+        # Check obs DB
+        db_path = tmp / ".wiki" / "obs.db"
+        assert db_path.exists(), "obs.db should exist after reindex"
+        conn = sqlite3.connect(str(db_path))
+
+        runs = conn.execute("SELECT command FROM obs_runs").fetchall()
+        assert any(r[0] == "reindex" for r in runs)
+
+        tool_calls = conn.execute("SELECT tool_name FROM obs_tool_calls").fetchall()
+        assert any(tc[0] == "embed_documents" for tc in tool_calls), f"Expected embed_documents, got: {tool_calls}"
+
+        conn.close()
+        print("✓ test_reindex_observability")
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_persistent_checkpointer_roundtrip():
     """Verify persistent checkpoints survive process-like reopen."""
     import tempfile
@@ -953,10 +1070,10 @@ def test_build_ingest_prompt():
     short = build_ingest_prompt("raw/notes.md", 500)
     assert "raw/notes.md" in short
     assert "500 words" in short
-    assert "directly without chunking" in short
+    assert "short enough to process directly" in short
 
-    long = build_ingest_prompt("raw/book.md", 50000)
-    assert "50000 words" in long
+    long = build_ingest_prompt("raw/book.md", 80_000)
+    assert "80000 words" in long
     assert "review_long_source" in long
     print("✓ test_build_ingest_prompt")
 
@@ -1156,6 +1273,9 @@ if __name__ == "__main__":
     test_agent_construction()
     test_observability_store()
     test_observability_init_run()
+    test_observable_embeddings()
+    test_observable_embeddings_passthrough()
+    test_reindex_observability()
     test_persistent_checkpointer_roundtrip()
     test_telegram_state_store_and_rotation()
     test_split_telegram_text()

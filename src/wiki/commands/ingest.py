@@ -31,13 +31,35 @@ Behavior:
 """
 
 
-def build_ingest_prompt(path: str, word_count: int) -> str:
-    """Build the initial user prompt for an ingest turn."""
+LONG_SOURCE_WORD_THRESHOLD = 70_000  # ~100k tokens
+
+
+def _build_short_prompt(path: str, word_count: int) -> str:
+    """Prompt for sources that fit in a single context window."""
     return (
         f"Ingest the source file at `{path}` into the wiki.\n\n"
-        f"The source is {word_count} words long. "
-        f"{'It is long enough to benefit from the long-source review graph (use review_long_source first).' if word_count > 10000 else 'Process it directly without chunking.'}\n\n"
+        f"The source is {word_count} words — short enough to process directly. "
+        "Read it in full, then create wiki pages without chunking.\n\n"
         "Start by reading the source and wiki/index.md, then present your plan. "
+        "Do NOT make any changes yet — describe what pages you plan to create/update and why."
+    )
+
+
+def _build_long_prompt(path: str, result: object) -> str:
+    """Prompt for pre-processed long sources, with pipeline results baked in."""
+    notes = "\n".join(f"- {n}" for n in result.review_notes) or "- No review notes"
+    titles = ", ".join(result.group_titles) or "none"
+    return (
+        f"Ingest the source file at `{path}` into the wiki.\n\n"
+        f"The source was too large for a single pass, so it was pre-processed through the chunk-review pipeline.\n"
+        f"Pipeline results:\n"
+        f"- Chunks: {result.chunk_count}\n"
+        f"- Review decision: {result.decision}\n"
+        f"- Draft groups: {titles}\n"
+        f"- Artifacts: {result.artifact_dir}\n"
+        f"Review notes:\n{notes}\n\n"
+        "Review the draft files in the artifacts directory, then decide which pages to create/update. "
+        "Read the draft files and wiki/index.md, then present your plan. "
         "Do NOT make any changes yet — describe what pages you plan to create/update and why."
     )
 

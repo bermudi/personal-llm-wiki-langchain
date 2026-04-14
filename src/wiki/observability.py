@@ -425,3 +425,63 @@ def init_run(command: str, thread_id: str) -> tuple[ObsStore, str]:
         reasoning_effort=get_reasoning_effort(),
     )
     return store, run_id
+
+
+# ---------------------------------------------------------------------------
+# Observable embeddings wrapper
+# ---------------------------------------------------------------------------
+
+class ObservableEmbeddings:
+    """Wraps any embeddings provider with SQLite observability logging.
+
+    Delegates ``embed_documents`` and ``embed_query`` to the inner provider
+    and logs every call to ``obs_tool_calls``.  Falls back to transparent
+    pass-through when no ``ObsStore`` is provided.
+
+    Usage::
+
+        inner = OpenAIEmbeddings(model="text-embedding-3-small", ...)
+        obs = ObservableEmbeddings(inner, obs_store=store, run_id=run_id)
+        chroma = Chroma(embedding_function=obs, ...)
+    """
+
+    def __init__(self, inner: Any, *, obs_store: ObsStore | None = None, run_id: str = "") -> None:
+        self._inner = inner
+        self._obs_store = obs_store
+        self._run_id = run_id
+
+    # -- Chroma / LangChain embeddings interface --------------------------
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        t0 = time.monotonic()
+        vectors = self._inner.embed_documents(texts)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        self._log("embed_documents", len(texts), sum(len(t) for t in texts), elapsed_ms)
+        return vectors
+
+    def embed_query(self, text: str) -> list[float]:
+        t0 = time.monotonic()
+        vector = self._inner.embed_query(text)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        self._log("embed_query", 1, len(text), elapsed_ms)
+        return vector
+
+    # -- Pass-through attribute access for LangChain internals ------------
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    # -- Internal ----------------------------------------------------------
+
+    def _log(self, method: str, text_count: int, total_chars: int, elapsed_ms: int) -> None:
+        if self._obs_store is None:
+            return
+        self._obs_store.insert_tool_call(
+            run_id=self._run_id,
+            turn=0,
+            tool_call_id=None,
+            tool_name=method,
+            arguments={"text_count": text_count, "total_chars": total_chars},
+            result=f"{method}: {text_count} texts, {total_chars} chars in {elapsed_ms}ms",
+            duration_ms=elapsed_ms,
+        )

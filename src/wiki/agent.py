@@ -33,9 +33,9 @@ The wiki has three layers:
 - Append to `wiki/log.md` with format: `## [YYYY-MM-DD] <operation> | <description>` followed by bullet points
 - Use `search_wiki` to find relevant existing pages before creating new ones
 
-## Long-source review (for sources ~10k+ words)
+## Long-source review (for sources ~70k+ words / ~100k+ tokens)
 
-For long sources, prefer `review_long_source`.
+For sources too large for a single context window, use `review_long_source`.
 It runs a LangGraph workflow that:
 1. mechanically splits the source
 2. embeds the chunks and builds neighbor metadata
@@ -47,7 +47,7 @@ After `review_long_source`, inspect the generated `review.json` / draft files as
 then write the final wiki pages and update `wiki/index.md` + `wiki/log.md`.
 
 Use `split_source` only when you want a purely mechanical chunk dump for inspection.
-For short sources, process directly without chunking.
+For sources under ~70k words, read the source in full and process directly without chunking.
 
 ## Orient Yourself
 
