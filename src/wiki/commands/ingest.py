@@ -34,32 +34,53 @@ Behavior:
 LONG_SOURCE_WORD_THRESHOLD = 70_000  # ~100k tokens
 
 
-def _build_short_prompt(path: str, word_count: int) -> str:
+def _build_short_prompt(path: str, content: str, word_count: int) -> str:
     """Prompt for sources that fit in a single context window."""
     return (
         f"Ingest the source file at `{path}` into the wiki.\n\n"
         f"The source is {word_count} words — short enough to process directly. "
-        "Read it in full, then create wiki pages without chunking.\n\n"
-        "Start by reading the source and wiki/index.md, then present your plan. "
+        "Create wiki pages from this source.\n\n"
+        f"## Source: {path}\n\n{content}\n\n"
+        "Read wiki/index.md, then present your plan. "
         "Do NOT make any changes yet — describe what pages you plan to create/update and why."
     )
 
 
 def _build_long_prompt(path: str, result: object) -> str:
-    """Prompt for pre-processed long sources, with pipeline results baked in."""
+    """Prompt for pre-processed long sources, with pipeline results and draft content injected."""
     notes = "\n".join(f"- {n}" for n in result.review_notes) or "- No review notes"
     titles = ", ".join(result.group_titles) or "none"
+
+    # Inject draft file contents directly so the agent doesn't have to discover them
+    draft_sections: list[str] = []
+    for draft_path in result.draft_paths:
+        p = Path(draft_path)
+        if p.exists():
+            draft_sections.append(f"### {p.stem}\n\n{p.read_text(encoding='utf-8')}")
+        else:
+            draft_sections.append(f"### {p.stem}\n\n[Draft file not found: {draft_path}]")
+    drafts_text = "\n\n".join(draft_sections) if draft_sections else "No draft files generated."
+
+    # Also inject the review JSON for grouping rationale
+    review_path = Path(result.artifact_dir) / "review.json"
+    review_text = ""
+    if review_path.exists():
+        review_text = f"\n## Review Decisions\n\n{review_path.read_text(encoding='utf-8')}\n"
+
     return (
         f"Ingest the source file at `{path}` into the wiki.\n\n"
         f"The source was too large for a single pass, so it was pre-processed through the chunk-review pipeline.\n"
-        f"Pipeline results:\n"
+        f"Pipeline summary:\n"
         f"- Chunks: {result.chunk_count}\n"
         f"- Review decision: {result.decision}\n"
         f"- Draft groups: {titles}\n"
-        f"- Artifacts: {result.artifact_dir}\n"
+        f"- Artifacts dir: {result.artifact_dir}\n"
         f"Review notes:\n{notes}\n\n"
-        "Review the draft files in the artifacts directory, then decide which pages to create/update. "
-        "Read the draft files and wiki/index.md, then present your plan. "
+        f"## Draft Pages\n\n"
+        f"The following page drafts were generated. Use these as starting points for your final wiki pages:\n\n"
+        f"{drafts_text}\n"
+        f"{review_text}\n"
+        "Read wiki/index.md, then present your plan for turning these drafts into final wiki pages. "
         "Do NOT make any changes yet — describe what pages you plan to create/update and why."
     )
 
@@ -90,6 +111,37 @@ def run_ingest(path: str, *, no_tui: bool = False) -> None:
     store, run_id = init_run("ingest", thread_id)
     obs_middleware = create_observability_middleware(store, run_id)
 
+    # ── Run pipeline for long sources BEFORE the agent loop ──────────
+    pipeline_result = None
+    if word_count > LONG_SOURCE_WORD_THRESHOLD:
+        console.print(Panel(
+            f"Source is [bold]{word_count:,}[/bold] words — running chunk-review pipeline…",
+            title="Pre-processing",
+            border_style="yellow",
+        ))
+        from wiki.ingest_graph import run_chunk_review_graph
+        pipeline_result = run_chunk_review_graph(
+            path=path,
+            obs_store=store,
+            run_id=run_id,
+        )
+        draft_paths = "\n".join(f"  {p}" for p in pipeline_result.draft_paths)
+        console.print(Panel(
+            f"Pipeline complete.\n"
+            f"Chunks: {pipeline_result.chunk_count}\n"
+            f"Decision: {pipeline_result.decision}\n"
+            f"Draft groups: {', '.join(pipeline_result.group_titles)}\n"
+            f"Draft files:\n{draft_paths}",
+            title="Pipeline Results",
+            border_style="green",
+        ))
+
+    # Build initial prompt based on whether pipeline ran
+    if pipeline_result is not None:
+        user_prompt = _build_long_prompt(path, pipeline_result)
+    else:
+        user_prompt = _build_short_prompt(path, source_content, word_count)
+
     # Build agent — the REPL *is* the approval gate
     checkpointer = MemorySaver()
     agent = create_wiki_agent(
@@ -107,7 +159,7 @@ def run_ingest(path: str, *, no_tui: bool = False) -> None:
 
     initial_messages: list[dict] = [
         {"role": "system", "content": SYSTEM_SUFFIX},
-        {"role": "user", "content": build_ingest_prompt(path, word_count)},
+        {"role": "user", "content": user_prompt},
     ]
 
     try:

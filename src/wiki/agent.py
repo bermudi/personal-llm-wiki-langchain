@@ -33,21 +33,15 @@ The wiki has three layers:
 - Append to `wiki/log.md` with format: `## [YYYY-MM-DD] <operation> | <description>` followed by bullet points
 - Use `search_wiki` to find relevant existing pages before creating new ones
 
-## Long-source review (for sources ~70k+ words / ~100k+ tokens)
+## Long-source pipeline (automatic)
 
-For sources too large for a single context window, use `review_long_source`.
-It runs a LangGraph workflow that:
-1. mechanically splits the source
-2. embeds the chunks and builds neighbor metadata
-3. summarizes each chunk
-4. reviews candidate groups and may retry with smaller chunks
-5. writes page drafts into `scratch/<source>/chunk-review/...`
+For sources over ~70k words (~100k tokens), the ingest command runs the chunk-review pipeline BEFORE the agent session starts. The pipeline produces:
+1. Chunk summaries and review artifacts in `scratch/<source>/chunk-review/`
+2. Draft wiki pages in `scratch/<source>/chunk-review/attempt-XX/drafts/`
 
-After `review_long_source`, inspect the generated `review.json` / draft files as needed,
-then write the final wiki pages and update `wiki/index.md` + `wiki/log.md`.
+You will receive the pipeline results in your initial prompt. Read the draft files and review.json, then decide which pages to create/update.
 
-Use `split_source` only when you want a purely mechanical chunk dump for inspection.
-For sources under ~70k words, read the source in full and process directly without chunking.
+For shorter sources, read the source in full and process directly (no chunking needed).
 
 ## Orient Yourself
 

@@ -1064,17 +1064,58 @@ def test_telegram_download_file():
 
 
 def test_build_ingest_prompt():
-    """Verify build_ingest_prompt generates the right prompt."""
-    from wiki.commands.ingest import build_ingest_prompt
+    """Verify _build_short_prompt and _build_long_prompt generate the right prompts."""
+    from wiki.commands.ingest import _build_short_prompt, _build_long_prompt
+    from wiki.ingest_graph import ChunkReviewResult
 
-    short = build_ingest_prompt("raw/notes.md", 500)
+    short = _build_short_prompt("raw/notes.md", "Hello world this is a note.", 5)
     assert "raw/notes.md" in short
-    assert "500 words" in short
+    assert "5 words" in short
     assert "short enough to process directly" in short
+    assert "Hello world this is a note" in short
 
-    long = build_ingest_prompt("raw/book.md", 80_000)
-    assert "80000 words" in long
-    assert "review_long_source" in long
+    # Long prompt uses a pipeline result object
+    result = ChunkReviewResult(
+        source_path="raw/book.md",
+        attempt=1,
+        final_chunk_size=1500,
+        chunk_count=42,
+        decision="accept",
+        artifact_dir="scratch/book/chunk-review/attempt-01",
+        review_notes=["Groups look coherent."],
+        draft_paths=["scratch/book/chunk-review/attempt-01/drafts/ch1.md"],
+        group_titles=["chapter-1"],
+    )
+    long = _build_long_prompt("raw/book.md", result)
+    assert "raw/book.md" in long
+    assert "42" in long
+    assert "chunk-review pipeline" in long
+    assert "Draft Pages" in long
+    assert "Draft file not found" in long  # path doesn't exist on disk
+
+    # Test with a real draft file on disk
+    tmp = Path(tempfile.mkdtemp(prefix="wiki-draft-test-"))
+    try:
+        draft_dir = tmp / "scratch" / "book" / "chunk-review" / "attempt-01" / "drafts"
+        draft_dir.mkdir(parents=True, exist_ok=True)
+        (draft_dir / "ch1.md").write_text("# Chapter 1\n\nDraft content here.", encoding="utf-8")
+
+        result_with_drafts = ChunkReviewResult(
+            source_path="raw/book.md",
+            attempt=1,
+            final_chunk_size=1500,
+            chunk_count=42,
+            decision="accept",
+            artifact_dir=str(tmp / "scratch" / "book" / "chunk-review" / "attempt-01"),
+            review_notes=["Groups look coherent."],
+            draft_paths=[str(draft_dir / "ch1.md")],
+            group_titles=["chapter-1"],
+        )
+        long_with_files = _build_long_prompt("raw/book.md", result_with_drafts)
+        assert "Draft content here" in long_with_files
+    finally:
+        shutil.rmtree(tmp)
+
     print("✓ test_build_ingest_prompt")
 
 
