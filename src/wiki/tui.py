@@ -162,9 +162,17 @@ class WikiReplApp(App):
     #input-bar {
         height: auto;
         dock: bottom;
-        padding: 0 1;
+        padding: 1 1 0 1;
         background: #161b22;
         border-top: tall #30363d;
+    }
+
+    #input-status {
+        height: 1;
+        width: 100%;
+        color: #484f58;
+        padding: 0 2;
+        text-style: italic;
     }
 
     Input {
@@ -187,16 +195,7 @@ class WikiReplApp(App):
         color: #58a6ff;
     }
 
-    #status {
-        dock: bottom;
-        height: 1;
-        width: 100%;
-        background: #0d1117;
-        color: #484f58;
-        padding: 0 3;
-        content-align: left middle;
-        text-style: italic;
-    }
+
 
     Header {
         background: #161b22;
@@ -256,12 +255,12 @@ class WikiReplApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield VerticalScroll(id="message-log")
-        yield Static("", id="status")
         yield Horizontal(
             Input(
                 placeholder="Ask something… (Ctrl+Q quit · Ctrl+C interrupt)",
                 id="user-input",
             ),
+            Static("", id="input-status"),
             id="input-bar",
         )
         yield Footer()
@@ -558,7 +557,7 @@ class WikiReplApp(App):
     # ── Status bar ──────────────────────────────────────────────────
 
     def _update_status(self) -> None:
-        status = self.query_one("#status", Static)
+        status = self.query_one("#input-status", Static)
         parts = [self.model_name, f"turn {self.turn_count}"]
         if self.is_streaming:
             parts.append("● streaming")
