@@ -657,6 +657,225 @@ def test_split_telegram_text():
     print("✓ test_split_telegram_text")
 
 
+def test_telegram_download_file():
+    """Verify TelegramClient.download_file writes the response body to disk."""
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    from wiki.telegram_client import TelegramClient
+
+    client = TelegramClient("fake-token")
+
+    # Mock _request to return a file_path
+    mock_result = {"file_path": "documents/abc.txt"}
+    client._request = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
+
+    # Mock urlopen to return bytes
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = b"file contents here"
+    mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "test.txt"
+        with patch("wiki.telegram_client.request.urlopen", return_value=mock_resp):
+            result = client.download_file("file-id-123", dest)
+
+        assert result == dest
+        assert dest.read_text() == "file contents here"
+        print("✓ test_telegram_download_file")
+
+
+def test_build_ingest_prompt():
+    """Verify build_ingest_prompt generates the right prompt."""
+    from wiki.commands.ingest import build_ingest_prompt
+
+    short = build_ingest_prompt("raw/notes.md", 500)
+    assert "raw/notes.md" in short
+    assert "500 words" in short
+    assert "directly without chunking" in short
+
+    long = build_ingest_prompt("raw/book.md", 50000)
+    assert "50000 words" in long
+    assert "split_source" in long
+    print("✓ test_build_ingest_prompt")
+
+
+def test_handle_attachment_downloads_and_ingests():
+    """Verify _handle_attachment downloads file and runs ingest turn."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki = Path(tmp)
+        (wiki / "raw").mkdir()
+        (wiki / "wiki").mkdir()
+        (wiki / "scratch").mkdir()
+
+        # Create a source file that download_file would write
+        source_content = "# Test Source\n\nSome interesting content about things."
+
+        mock_client = MagicMock()
+        def fake_download(file_id, dest):
+            dest.write_text(source_content, encoding="utf-8")
+            return dest
+        mock_client.download_file.side_effect = fake_download
+        sent: list[str] = []
+        mock_client.send_messages.side_effect = lambda cid, txt: sent.append(txt)
+
+        mock_store = MagicMock()
+        mock_session = MagicMock()
+        mock_session.active_thread_id = "telegram:42:epoch:1"
+
+        mock_checkpointer = MagicMock()
+        mock_model = MagicMock()
+
+        # Patch cwd to our temp wiki
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki):
+                # Patch _run_ingest_turn to avoid needing a real LLM
+                with patch("wiki.commands.telegram._run_ingest_turn", return_value="Plan: create 2 pages.") as mock_ingest:
+                    from wiki.commands.telegram import _handle_attachment
+
+                    _handle_attachment(
+                        message={"chat": {"id": 42}, "update_id": 99, "message_id": 100},
+                        document={"file_id": "abc123", "file_name": "test-notes.md"},
+                        photos=None,
+                        caption="Please focus on the key arguments",
+                        client=mock_client,
+                        state_store=mock_store,
+                        checkpointer=mock_checkpointer,
+                        model=mock_model,
+                        session=mock_session,
+                    )
+
+                    # File was downloaded
+                    assert (wiki / "raw" / "test-notes.md").read_text() == source_content
+
+                    # Ingest turn was called with prompt mentioning the file + caption
+                    call_prompt = mock_ingest.call_args[1]["prompt"]
+                    assert "raw/test-notes.md" in call_prompt
+                    assert "key arguments" in call_prompt
+
+                    # Confirmation message was sent
+                    assert any("test-notes.md" in s for s in sent)
+                    assert any("Plan: create 2 pages." in s for s in sent)
+
+                    print("✓ test_handle_attachment_downloads_and_ingests")
+
+
+def test_handle_attachment_binary_file_rejected():
+    """Verify binary files get a graceful rejection message."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki = Path(tmp)
+        (wiki / "raw").mkdir()
+        (wiki / "wiki").mkdir()
+        (wiki / "scratch").mkdir()
+
+        mock_client = MagicMock()
+        def fake_download(file_id, dest):
+            dest.write_bytes(b"\x89PNG\r\n\x1a\n")  # PNG header
+            return dest
+        mock_client.download_file.side_effect = fake_download
+        sent: list[str] = []
+        mock_client.send_messages.side_effect = lambda cid, txt: sent.append(txt)
+
+        mock_store = MagicMock()
+        mock_session = MagicMock()
+        mock_checkpointer = MagicMock()
+        mock_model = MagicMock()
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki):
+                from wiki.commands.telegram import _handle_attachment
+
+                _handle_attachment(
+                    message={"chat": {"id": 42}, "update_id": 99, "message_id": 100},
+                    document={"file_id": "abc123", "file_name": "photo.png"},
+                    photos=None,
+                    caption="",
+                    client=mock_client,
+                    state_store=mock_store,
+                    checkpointer=mock_checkpointer,
+                    model=mock_model,
+                    session=mock_session,
+                )
+
+                # Should get a rejection about non-text file
+                assert any("not a text file" in s.lower() or "non-text" in s.lower() for s in sent)
+                print("✓ test_handle_attachment_binary_file_rejected")
+
+
+def test_handle_attachment_mixed_files():
+    """Verify mixed text+binary: text files ingested, binary skipped."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki = Path(tmp)
+        (wiki / "raw").mkdir()
+        (wiki / "wiki").mkdir()
+        (wiki / "scratch").mkdir()
+
+        mock_client = MagicMock()
+        text_content = "# Notes\n\nSome text content."
+
+        # Document download returns text, photo download returns binary
+        def fake_download(file_id, dest):
+            if file_id == "doc-id":
+                dest.write_text(text_content, encoding="utf-8")
+            else:
+                dest.write_bytes(b"\x89PNG\r\n\x1a\n")
+            return dest
+        mock_client.download_file.side_effect = fake_download
+        sent: list[str] = []
+        mock_client.send_messages.side_effect = lambda cid, txt: sent.append(txt)
+
+        mock_store = MagicMock()
+        mock_session = MagicMock()
+        mock_session.active_thread_id = "telegram:42:epoch:1"
+        mock_checkpointer = MagicMock()
+        mock_model = MagicMock()
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki):
+                with patch("wiki.commands.telegram._run_ingest_turn", return_value="Plan: 1 page.") as mock_ingest:
+                    from wiki.commands.telegram import _handle_attachment
+
+                    # Message with both a text document and a photo
+                    _handle_attachment(
+                        message={"chat": {"id": 42}, "update_id": 99, "message_id": 100},
+                        document={"file_id": "doc-id", "file_name": "notes.md"},
+                        photos=[{"file_id": "photo-id", "file_size": 1000}],
+                        caption="",
+                        client=mock_client,
+                        state_store=mock_store,
+                        checkpointer=mock_checkpointer,
+                        model=mock_model,
+                        session=mock_session,
+                    )
+
+                    # Ingest was called (text document was valid)
+                    mock_ingest.assert_called_once()
+                    call_prompt = mock_ingest.call_args[1]["prompt"]
+                    # Only the text file should appear in the prompt
+                    assert "notes.md" in call_prompt
+                    assert "photo_" not in call_prompt
+                    # Binary was skipped — rejection message sent
+                    assert any("non-text" in s.lower() for s in sent)
+                    print("✓ test_handle_attachment_mixed_files")
+
+
 if __name__ == "__main__":
     print("Running wiki CLI tests...\n")
     test_init_creates_structure()
@@ -679,4 +898,9 @@ if __name__ == "__main__":
     test_persistent_checkpointer_roundtrip()
     test_telegram_state_store_and_rotation()
     test_split_telegram_text()
+    test_telegram_download_file()
+    test_build_ingest_prompt()
+    test_handle_attachment_downloads_and_ingests()
+    test_handle_attachment_binary_file_rejected()
+    test_handle_attachment_mixed_files()
     print("\nAll tests passed!")

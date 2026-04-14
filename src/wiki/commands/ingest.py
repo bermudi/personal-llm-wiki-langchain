@@ -31,12 +31,15 @@ Behavior:
 """
 
 
-def _build_ingest_prompt(path: str, word_count: int) -> str:
-    return f"""Ingest the source file at `{path}` into the wiki.
-
-The source is {word_count} words long. {'It is long enough to benefit from chunking (use split_source first).' if word_count > 10000 else 'Process it directly without chunking.'}
-
-Start by reading the source and wiki/index.md, then present your plan. Do NOT make any changes yet — describe what pages you plan to create/update and why."""
+def build_ingest_prompt(path: str, word_count: int) -> str:
+    """Build the initial user prompt for an ingest turn."""
+    return (
+        f"Ingest the source file at `{path}` into the wiki.\n\n"
+        f"The source is {word_count} words long. "
+        f"{'It is long enough to benefit from chunking (use split_source first).' if word_count > 10000 else 'Process it directly without chunking.'}\n\n"
+        "Start by reading the source and wiki/index.md, then present your plan. "
+        "Do NOT make any changes yet — describe what pages you plan to create/update and why."
+    )
 
 
 # Shortcut map for ingest approval phrases
@@ -82,7 +85,7 @@ def run_ingest(path: str, *, no_tui: bool = False) -> None:
 
     initial_messages: list[dict] = [
         {"role": "system", "content": SYSTEM_SUFFIX},
-        {"role": "user", "content": _build_ingest_prompt(path, word_count)},
+        {"role": "user", "content": build_ingest_prompt(path, word_count)},
     ]
 
     try:

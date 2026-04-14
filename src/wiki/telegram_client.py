@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from urllib import error, request
 
 _MAX_TELEGRAM_MESSAGE_LEN = 4000
@@ -87,6 +88,19 @@ class TelegramClient:
 
     def send_message(self, chat_id: int, text: str) -> None:
         self._request("sendMessage", {"chat_id": chat_id, "text": text}, timeout=30)
+
+    def download_file(self, file_id: str, dest: Path, *, timeout: int = 60) -> Path:
+        """Download a file by its file_id to *dest*. Returns the written path."""
+        # 1. getFilePath
+        result = self._request("getFile", {"file_id": file_id}, timeout=15)
+        file_path = result["file_path"]  # type: ignore[index]
+        download_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        req = request.Request(download_url)
+        with request.urlopen(req, timeout=timeout) as resp:
+            dest.write_bytes(resp.read())
+        return dest
 
     def send_messages(self, chat_id: int, text: str) -> None:
         for chunk in split_telegram_text(text):
