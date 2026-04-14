@@ -36,7 +36,7 @@ def build_ingest_prompt(path: str, word_count: int) -> str:
     return (
         f"Ingest the source file at `{path}` into the wiki.\n\n"
         f"The source is {word_count} words long. "
-        f"{'It is long enough to benefit from chunking (use split_source first).' if word_count > 10000 else 'Process it directly without chunking.'}\n\n"
+        f"{'It is long enough to benefit from the long-source review graph (use review_long_source first).' if word_count > 10000 else 'Process it directly without chunking.'}\n\n"
         "Start by reading the source and wiki/index.md, then present your plan. "
         "Do NOT make any changes yet — describe what pages you plan to create/update and why."
     )

@@ -328,7 +328,7 @@ def _handle_attachment(
             f"Ingest the following source files into the wiki:\n\n"
             + "\n".join(sources_info)
             + f"\n\nTotal: {total_words} words across {len(valid_paths)} files."
-            + ("\nSome sources may benefit from chunking (split_source)." if total_words > 10000 else "")
+            + ("\nSome sources may benefit from the long-source review graph (review_long_source)." if total_words > 10000 else "")
             + "\n\nStart by reading each source and wiki/index.md, then present your plan. "
             "Do NOT make any changes yet — describe what pages you plan to create/update and why."
         )

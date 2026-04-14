@@ -48,7 +48,7 @@ uv run wiki reindex
 - **Chat model**: Default `gpt-4.1-mini` via Poe (set `WIKI_MODEL` / `WIKI_CHAT_BASE_URL` to override)
 - **Embeddings**: `openai/text-embedding-3-small` via OpenRouter (set `WIKI_EMBED_MODEL` / `WIKI_EMBED_BASE_URL` to override)
 - **RAG**: Chroma vector store for semantic page discovery
-- **Chunking**: Pipeline tools for long sources (split → extract → group → synthesize)
+- **Chunking**: LangGraph long-source review flow (split → embed → summarize → review groups → synthesize drafts)
 - **Validation**: Middleware linter for index.md and log.md format
 - **HITL**: Configurable approval gates on ingest (`--approval=plan,page,commit,none`)
 - **Telegram**: Optional long-poll transport with durable SQLite session state and LangGraph checkpoints

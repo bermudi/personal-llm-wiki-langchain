@@ -9,16 +9,12 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 
-from wiki.config import get_embed_base_url, get_embedding_model, require_embed_api_key
+from wiki.config import build_embeddings
 
 
 def _get_embeddings() -> OpenAIEmbeddings:
     """Create embeddings instance using the embedding provider."""
-    return OpenAIEmbeddings(
-        model=get_embedding_model(),
-        base_url=get_embed_base_url(),
-        api_key=require_embed_api_key(),
-    )
+    return build_embeddings()
 
 
 def _chroma_dir() -> Path:

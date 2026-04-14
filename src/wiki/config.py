@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
 # ── .wiki/secrets.env loading ──────────────────────────────────────────
@@ -175,6 +175,15 @@ def build_model() -> ChatOpenAI:
         else:
             kwargs["reasoning_effort"] = effort
     return ChatOpenAI(**kwargs)
+
+
+def build_embeddings() -> OpenAIEmbeddings:
+    """Build an OpenAI-compatible embeddings client for chunk + wiki indexing."""
+    return OpenAIEmbeddings(
+        model=get_embedding_model(),
+        base_url=get_embed_base_url(),
+        api_key=require_embed_api_key(),
+    )
 
 
 def validate_wiki_dir() -> Path:

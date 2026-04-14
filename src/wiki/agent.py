@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from langchain.agents import create_agent
 
-from wiki.tools.chunking import extract_chunk, group_chunks, split_source, synthesize_group
+from wiki.tools.chunking import review_long_source, split_source
 from wiki.tools.filesystem import edit_file, list_files, read_file, search_files, write_file
 from wiki.tools.git import git_commit, git_log, git_status
 from wiki.tools.rag import search_wiki
@@ -33,14 +33,20 @@ The wiki has three layers:
 - Append to `wiki/log.md` with format: `## [YYYY-MM-DD] <operation> | <description>` followed by bullet points
 - Use `search_wiki` to find relevant existing pages before creating new ones
 
-## Chunking (for long sources ~10k+ words)
+## Long-source review (for sources ~10k+ words)
 
-For long sources, use the pipeline tools in order:
-1. `split_source` — mechanically split into size-bounded chunks
-2. `extract_chunk` — extract structured notes from each chunk
-3. `group_chunks` — group related chunks across the source
-4. `synthesize_group` — synthesize each group into wiki page content
+For long sources, prefer `review_long_source`.
+It runs a LangGraph workflow that:
+1. mechanically splits the source
+2. embeds the chunks and builds neighbor metadata
+3. summarizes each chunk
+4. reviews candidate groups and may retry with smaller chunks
+5. writes page drafts into `scratch/<source>/chunk-review/...`
 
+After `review_long_source`, inspect the generated `review.json` / draft files as needed,
+then write the final wiki pages and update `wiki/index.md` + `wiki/log.md`.
+
+Use `split_source` only when you want a purely mechanical chunk dump for inspection.
 For short sources, process directly without chunking.
 
 ## Orient Yourself
@@ -65,11 +71,9 @@ def get_all_tools() -> list:
         git_log,
         # RAG
         search_wiki,
-        # Chunking pipeline
+        # Long-source review
         split_source,
-        extract_chunk,
-        group_chunks,
-        synthesize_group,
+        review_long_source,
     ]
 
 

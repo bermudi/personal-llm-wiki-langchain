@@ -228,6 +228,264 @@ assert "chunk" in result.lower(), f"Expected chunks: {{result}}"
         shutil.rmtree(tmp)
 
 
+def test_chunk_review_graph():
+    """Verify the LangGraph chunk review flow groups semantically similar chunks."""
+    import json
+    import re
+
+    tmp = fresh_wiki()
+    try:
+        source_text = (
+            "# Trust One\n\n" + "trust community institution " * 120
+            + "\n\n# Power\n\n" + "power hierarchy authority " * 120
+            + "\n\n# Trust Two\n\n" + "trust legitimacy confidence " * 120
+        )
+        (tmp / "raw" / "graph-source.md").write_text(source_text, encoding="utf-8")
+
+        script = f"""
+import json
+import re
+import sys
+sys.path.insert(0, \"{PROJECT_DIR / "src"}\")
+from pathlib import Path
+from wiki.ingest_graph import run_chunk_review_graph
+
+class FakeResponse:
+    def __init__(self, content: str):
+        self.content = content
+
+class FakeModel:
+    def invoke(self, prompt: str):
+        if \"TASK: CHUNK_SUMMARY_JSON\" in prompt:
+            chunk_id = re.search(r\"chunk_id: (chunk-\\d+)\", prompt).group(1)
+            text = prompt.split(\"TEXT:\\n\", 1)[1].lower()
+            if \"power\" in text:
+                payload = {{
+                    \"summary\": \"Discussion of hierarchy and authority.\",
+                    \"topics\": [\"power\", \"authority\"],
+                    \"entities\": [],
+                    \"claims\": [\"Power concentrates through hierarchy\"],
+                    \"quotes\": [],
+                    \"mixed_topics\": False,
+                    \"split_recommendation\": \"keep\",
+                    \"confidence\": 0.9,
+                }}
+            else:
+                payload = {{
+                    \"summary\": \"Discussion of institutional trust and legitimacy.\",
+                    \"topics\": [\"trust\", \"legitimacy\"],
+                    \"entities\": [],
+                    \"claims\": [\"Trust is built socially\"],
+                    \"quotes\": [],
+                    \"mixed_topics\": False,
+                    \"split_recommendation\": \"keep\",
+                    \"confidence\": 0.92,
+                }}
+            payload[\"chunk_id\"] = chunk_id
+            return FakeResponse(json.dumps(payload))
+
+        if \"TASK: GROUP_REVIEW_JSON\" in prompt:
+            payload = {{
+                \"decision\": \"accept\",
+                \"review_notes\": [\"Trust sections form one theme across distant chunks.\"],
+                \"groups\": [
+                    {{
+                        \"title_hint\": \"institutional trust\",
+                        \"chunk_ids\": [\"chunk-001\", \"chunk-003\"],
+                        \"rationale\": \"Both chunks discuss trust and legitimacy.\",
+                        \"confidence\": 0.94,
+                    }},
+                    {{
+                        \"title_hint\": \"authority structures\",
+                        \"chunk_ids\": [\"chunk-002\"],
+                        \"rationale\": \"This chunk is a standalone discussion of power.\",
+                        \"confidence\": 0.9,
+                    }},
+                ],
+                \"retry_reason\": None,
+                \"focus_chunk_ids\": [],
+            }}
+            return FakeResponse(json.dumps(payload))
+
+        if \"TASK: SYNTHESIZE_GROUP_PAGE\" in prompt:
+            title = re.search(r\"title_hint: (.+)\", prompt).group(1).strip()
+            return FakeResponse(
+                f\"# {{title.title()}}\\n\\n## Context\\n\\nDrafted from grouped chunks.\\n\\n## Analysis\\n\\nSynthesized content.\\n\\n## Source references\\n\\n- grouped chunks\\n\"
+            )
+
+        raise AssertionError(f\"Unexpected prompt: {{prompt[:120]}}\")
+
+class FakeEmbeddings:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        vectors = []
+        for text in texts:
+            lower = text.lower()
+            if \"power\" in lower:
+                vectors.append([0.0, 1.0, 0.0])
+            else:
+                vectors.append([1.0, 0.0, 0.0])
+        return vectors
+
+result = run_chunk_review_graph(
+    path=\"raw/graph-source.md\",
+    chunk_size=120,
+    max_retries=1,
+    model=FakeModel(),
+    embeddings=FakeEmbeddings(),
+)
+
+assert result.chunk_count >= 3, result
+assert len(result.draft_paths) == 2, result
+assert any(path.endswith(\"institutional-trust.md\") for path in result.draft_paths), result.draft_paths
+assert any(path.endswith(\"authority-structures.md\") for path in result.draft_paths), result.draft_paths
+assert Path(result.artifact_dir, \"review.json\").exists()
+assert Path(result.artifact_dir, \"candidate-groups.json\").exists()
+print(\"✓ test_chunk_review_graph\")
+"""
+        result = subprocess.run(
+            ["uv", "run", "--project", str(PROJECT_DIR), "python", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=tmp,
+        )
+        assert result.returncode == 0, f"Chunk review graph test failed: {result.stderr}"
+        print(result.stdout.strip())
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_chunk_review_graph_observability():
+    """Verify chunk review graph logs every model call and embedding call to SQLite."""
+    import json
+    import re
+    import sqlite3
+
+    tmp = fresh_wiki()
+    try:
+        source_text = (
+            "# Trust\n\n" + "trust community " * 80
+            + "\n\n# Power\n\n" + "power authority " * 80
+        )
+        (tmp / "raw" / "obs-source.md").write_text(source_text, encoding="utf-8")
+
+        script = f"""
+import json
+import re
+import sqlite3
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, \"{PROJECT_DIR / "src"}\")
+from wiki.ingest_graph import run_chunk_review_graph
+from wiki.observability import ObsStore
+
+class FakeResponse:
+    def __init__(self, content: str):
+        self.content = content
+        self.additional_kwargs = {{}}
+        self.usage_metadata = {{"input_tokens": 10, "output_tokens": 5}}
+
+class FakeModel:
+    def invoke(self, prompt: str):
+        if \"TASK: CHUNK_SUMMARY_JSON\" in prompt:
+            chunk_id = re.search(r\"chunk_id: (chunk-\\d+)\", prompt).group(1)
+            text = prompt.split(\"TEXT:\\n\", 1)[1].lower()
+            if \"power\" in text:
+                payload = {{
+                    \"summary\": \"About power.\",
+                    \"topics\": [\"power\"],
+                    \"entities\": [],
+                    \"claims\": [],
+                    \"quotes\": [],
+                    \"mixed_topics\": False,
+                    \"split_recommendation\": \"keep\",
+                    \"confidence\": 0.9,
+                }}
+            else:
+                payload = {{
+                    \"summary\": \"About trust.\",
+                    \"topics\": [\"trust\"],
+                    \"entities\": [],
+                    \"claims\": [],
+                    \"quotes\": [],
+                    \"mixed_topics\": False,
+                    \"split_recommendation\": \"keep\",
+                    \"confidence\": 0.9,
+                }}
+            payload[\"chunk_id\"] = chunk_id
+            return FakeResponse(json.dumps(payload))
+
+        if \"TASK: GROUP_REVIEW_JSON\" in prompt:
+            return FakeResponse(json.dumps({{
+                \"decision\": \"accept\",
+                \"review_notes\": [\"Looks good.\"],
+                \"groups\": [
+                    {{\"title_hint\": \"trust\", \"chunk_ids\": [\"chunk-001\"], \"rationale\": \"Trust.\", \"confidence\": 0.9}},
+                ],
+                \"retry_reason\": None,
+                \"focus_chunk_ids\": [],
+            }}))
+
+        if \"TASK: SYNTHESIZE_GROUP_PAGE\" in prompt:
+            title = re.search(r\"title_hint: (.+)\", prompt).group(1).strip()
+            return FakeResponse(f\"# {{title.title()}}\\n\\nDraft page.\\n\")
+
+        raise AssertionError(f\"Unexpected prompt\")
+
+class FakeEmbeddings:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0]] * len(texts)
+
+# Set up obs store in a temp file
+db_path = Path(\"{tmp}/.wiki/obs.db\")
+obs = ObsStore(db_path)
+
+result = run_chunk_review_graph(
+    path=\"raw/obs-source.md\",
+    chunk_size=80,
+    max_retries=0,
+    model=FakeModel(),
+    embeddings=FakeEmbeddings(),
+    obs_store=obs,
+    run_id=\"test-obs-run-123\",
+)
+obs.close()
+
+# Verify obs tables
+conn = sqlite3.connect(str(db_path))
+
+runs = conn.execute(\"SELECT id, command FROM obs_runs\").fetchall()
+assert len(runs) == 1
+assert runs[0][0] == \"test-obs-run-123\"
+assert runs[0][1] == \"chunk-review\"
+
+model_calls = conn.execute(\"SELECT turn, response FROM obs_model_calls ORDER BY turn\").fetchall()
+assert len(model_calls) >= 3, f\"Expected >= 3 model calls, got {{len(model_calls)}}\"
+
+tool_calls = conn.execute(\"SELECT tool_name FROM obs_tool_calls\").fetchall()
+assert any(tc[0] == \"embed_documents\" for tc in tool_calls), f\"Expected embed_documents tool call, got: {{tool_calls}}\"
+
+messages = conn.execute(\"SELECT role FROM obs_messages\").fetchall()
+roles = [m[0] for m in messages]
+# Should have user + assistant pairs for each model call
+assert \"user\" in roles
+assert \"assistant\" in roles
+
+conn.close()
+print(\"✓ test_chunk_review_graph_observability\")
+"""
+        result = subprocess.run(
+            ["uv", "run", "--project", str(PROJECT_DIR), "python", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=tmp,
+        )
+        assert result.returncode == 0, f"Obs test failed: {result.stderr}"
+        print(result.stdout.strip())
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_agent_construction():
     """Verify the agent can be constructed without errors."""
     tmp = fresh_wiki()
@@ -238,7 +496,7 @@ sys.path.insert(0, "{PROJECT_DIR / "src"}")
 from wiki.agent import create_wiki_agent, get_all_tools
 
 tools = get_all_tools()
-assert len(tools) == 13, f"Expected 13 tools, got {{len(tools)}}"
+assert len(tools) == 11, f"Expected 11 tools, got {{len(tools)}}"
 
 # Verify all tools have names
 for t in tools:
@@ -248,6 +506,7 @@ tool_names = [t.name for t in tools]
 assert "read_file" in tool_names
 assert "search_wiki" in tool_names
 assert "split_source" in tool_names
+assert "review_long_source" in tool_names
 assert "git_commit" in tool_names
 
 print("✓ test_agent_construction")
@@ -698,7 +957,7 @@ def test_build_ingest_prompt():
 
     long = build_ingest_prompt("raw/book.md", 50000)
     assert "50000 words" in long
-    assert "split_source" in long
+    assert "review_long_source" in long
     print("✓ test_build_ingest_prompt")
 
 
@@ -885,6 +1144,8 @@ if __name__ == "__main__":
     test_git_tools()
     test_linter_middleware()
     test_chunking_split()
+    test_chunk_review_graph()
+    test_chunk_review_graph_observability()
     test_parse_dotenv()
     test_load_secrets_env_populates_os_environ()
     test_load_secrets_env_clobbers_existing()
