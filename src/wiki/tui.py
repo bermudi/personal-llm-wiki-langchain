@@ -18,6 +18,8 @@ Usage::
 from __future__ import annotations
 
 import time
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.console import Group
@@ -30,6 +32,9 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll, Horizontal
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Input, Static
+
+from wiki.config import get_chat_base_url, get_reasoning_effort, get_use_responses_api
+from wiki.slash_commands import SlashCommandContext, SlashCommandResult, build_chat_slash_registry
 
 if TYPE_CHECKING:
     pass
@@ -155,6 +160,10 @@ class WikiReplApp(App):
         margin: 0 0 1 0;
     }
 
+    .system-msg {
+        margin: 1 0;
+    }
+
     .error-msg {
         margin: 1 0;
     }
@@ -242,6 +251,7 @@ class WikiReplApp(App):
         self.model_name = model_name
         self.initial_messages = initial_messages
         self.shortcuts = shortcuts or {}
+        self.slash_registry = build_chat_slash_registry()
         self._cancel = False
 
         # Streaming state (set per-turn)
@@ -303,6 +313,9 @@ class WikiReplApp(App):
             return
         event.input.value = ""
 
+        if self._handle_slash_command(text):
+            return
+
         if text.lower() in ("exit", "quit", "done"):
             self.exit()
             return
@@ -313,6 +326,39 @@ class WikiReplApp(App):
             text = resolved
 
         self._send_user_message(text)
+
+    def _handle_slash_command(self, text: str) -> bool:
+        """Handle a slash command locally. Returns True when handled."""
+        result = self.slash_registry.dispatch(text, self._build_slash_context())
+        if result is None:
+            return False
+
+        if result.action == "reset-thread":
+            self.config.setdefault("configurable", {})["thread_id"] = str(uuid.uuid4())
+        elif result.action == "exit-app":
+            self.exit()
+            return True
+
+        if result.error:
+            self._show_error(result.reply)
+        else:
+            self._show_system_message(result)
+        return True
+
+    def _build_slash_context(self) -> SlashCommandContext:
+        configurable = self.config.get("configurable", {})
+        thread_id = configurable.get("thread_id", "unknown-thread")
+        help_footer = "Type normal text to chat with the wiki agent."
+        return SlashCommandContext(
+            transport="chat",
+            wiki_dir=Path.cwd(),
+            thread_id=str(thread_id),
+            model_name=self.model_name,
+            chat_base_url=get_chat_base_url(),
+            reasoning_effort=get_reasoning_effort(),
+            use_responses_api=get_use_responses_api(),
+            help_footer=help_footer,
+        )
 
     def _send_user_message(self, text: str) -> None:
         """Append a user bubble and kick off streaming."""
@@ -526,6 +572,25 @@ class WikiReplApp(App):
                 expand=True,
             )
         )
+
+    def _show_system_message(self, result: SlashCommandResult) -> None:
+        """Display a local/system message in the log."""
+        log = self.query_one("#message-log", VerticalScroll)
+        log.mount(
+            Static(
+                Panel(
+                    Text(result.reply, style="#8b949e"),
+                    title="⌘  Command",
+                    title_align="left",
+                    border_style="#30363d",
+                    padding=(0, 1),
+                    expand=True,
+                ),
+                classes="system-msg",
+            )
+        )
+        log.scroll_end(animate=False)
+        self._update_status()
 
     def _show_error(self, message: str) -> None:
         """Display an error message in the log."""

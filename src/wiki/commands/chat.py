@@ -8,7 +8,14 @@ from langgraph.checkpoint.memory import MemorySaver
 from rich.console import Console
 
 from wiki.agent import create_wiki_agent
-from wiki.config import get_model_name, validate_wiki_dir
+from wiki.config import (
+    get_chat_base_url,
+    get_model_name,
+    get_reasoning_effort,
+    get_use_responses_api,
+    validate_wiki_dir,
+)
+from wiki.slash_commands import SlashCommandContext, build_chat_slash_registry
 from wiki.middleware.linter import create_linter_middleware
 from wiki.observability import create_observability_middleware, init_run
 from wiki.streaming import stream_agent_response
@@ -39,6 +46,7 @@ def run_chat(*, no_tui: bool = False) -> None:
         "configurable": {"thread_id": thread_id},
         "recursion_limit": 100,
     }
+    slash_registry = build_chat_slash_registry()
 
     try:
         if not no_tui:
@@ -59,6 +67,31 @@ def run_chat(*, no_tui: bool = False) -> None:
             except (EOFError, KeyboardInterrupt):
                 console.print("\n[dim]Goodbye![/dim]")
                 break
+
+            slash_result = slash_registry.dispatch(
+                user_input,
+                SlashCommandContext(
+                    transport="chat",
+                    wiki_dir=cwd,
+                    thread_id=str(config.get("configurable", {}).get("thread_id", thread_id)),
+                    model_name=get_model_name(),
+                    chat_base_url=get_chat_base_url(),
+                    reasoning_effort=get_reasoning_effort(),
+                    use_responses_api=get_use_responses_api(),
+                    help_footer="Type normal text to chat with the wiki agent.",
+                ),
+            )
+            if slash_result is not None:
+                if slash_result.action == "reset-thread":
+                    config.setdefault("configurable", {})["thread_id"] = str(uuid.uuid4())
+                    messages = []
+                elif slash_result.action == "exit-app":
+                    console.print("[dim]Goodbye![/dim]")
+                    break
+
+                style = "red" if slash_result.error else "cyan"
+                console.print(f"[{style}]{slash_result.reply}[/{style}]\n")
+                continue
 
             if user_input.lower() in ("exit", "quit"):
                 console.print("[dim]Goodbye![/dim]")

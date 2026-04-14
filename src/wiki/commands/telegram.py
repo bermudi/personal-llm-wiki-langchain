@@ -13,24 +13,29 @@ from wiki.agent import create_wiki_agent, SYSTEM_PROMPT
 from wiki.checkpointing import PersistentCheckpointer, get_checkpoint_db_path
 from wiki.commands.ingest import SYSTEM_SUFFIX as INGEST_SYSTEM_SUFFIX
 from wiki.commands.ingest import build_ingest_prompt
-from wiki.config import build_model, require_telegram_bot_token, validate_wiki_dir
+from wiki.config import (
+    build_model,
+    get_chat_base_url,
+    get_model_name,
+    get_reasoning_effort,
+    get_use_responses_api,
+    require_telegram_bot_token,
+    validate_wiki_dir,
+)
 from wiki.middleware.linter import create_linter_middleware
 from wiki.observability import create_observability_middleware, init_run
+from wiki.slash_commands import SlashCommandContext, build_telegram_slash_registry
 from wiki.telegram_client import TelegramApiError, TelegramClient
 from wiki.telegram_state import TelegramStateStore, get_telegram_db_path
 
 console = Console()
 
-_HELP_TEXT = """Wiki Telegram bridge is live.
+_TELEGRAM_HELP_FOOTER = (
+    "Plain text → chat with the wiki agent.\n"
+    "Files (documents, photos) → ingest into the wiki."
+)
 
-Commands:
-/help   Show this message
-/status Show the active session + epoch
-/new    Start a fresh epoch without deleting old history
-/reset  Alias for /new
-
-Plain text → chat with the wiki agent.
-Files (documents, photos) → ingest into the wiki."""
+_TELEGRAM_SLASH_REGISTRY = build_telegram_slash_registry()
 
 
 def run_poll(*, once: bool = False, timeout: int = 30) -> None:
@@ -145,21 +150,30 @@ def _handle_update(
         )
         return
 
-    command = text.split(maxsplit=1)[0].split("@", 1)[0].lower()
-    if command in {"/start", "/help"}:
-        client.send_messages(chat_id, _HELP_TEXT)
-        return
-    if command in {"/new", "/reset"}:
-        rotated = state_store.rotate_session(chat_id, reason="manual-reset")
-        reply = f"Started fresh epoch {rotated.active_epoch}. Old history is still archived; new turns use {rotated.active_thread_id}."
-        client.send_messages(chat_id, reply)
-        return
-    if command == "/status":
-        reply = (
-            f"Session: {session.session_id}\n"
-            f"Epoch: {session.active_epoch}\n"
-            f"Thread: {session.active_thread_id}"
-        )
+    slash_result = _TELEGRAM_SLASH_REGISTRY.dispatch(
+        text,
+        SlashCommandContext(
+            transport="telegram",
+            wiki_dir=Path.cwd(),
+            thread_id=session.active_thread_id,
+            model_name=get_model_name(),
+            chat_base_url=get_chat_base_url(),
+            reasoning_effort=get_reasoning_effort(),
+            use_responses_api=get_use_responses_api(),
+            session_id=session.session_id,
+            active_epoch=session.active_epoch,
+            help_footer=_TELEGRAM_HELP_FOOTER,
+        ),
+    )
+    if slash_result is not None:
+        reply = slash_result.reply
+        if slash_result.action == "reset-thread":
+            rotated = state_store.rotate_session(chat_id, reason="slash-command")
+            reply = (
+                f"{reply}\n"
+                f"Epoch: {rotated.active_epoch}\n"
+                f"Thread: {rotated.active_thread_id}"
+            )
         client.send_messages(chat_id, reply)
         return
 

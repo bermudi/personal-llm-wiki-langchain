@@ -1020,6 +1020,162 @@ def test_require_telegram_bot_token_missing_exits():
                     print("✓ test_require_telegram_bot_token_missing_exits")
 
 
+def test_slash_commands_help_and_unknown():
+    """Verify shared slash command help/unknown handling across transports."""
+    import tempfile
+
+    from wiki.slash_commands import SlashCommandContext, build_chat_slash_registry, build_telegram_slash_registry
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+        (wiki_dir / "raw").mkdir()
+        (wiki_dir / "wiki").mkdir()
+        (wiki_dir / "scratch").mkdir()
+
+        chat_registry = build_chat_slash_registry()
+        chat_ctx = SlashCommandContext(
+            transport="chat",
+            wiki_dir=wiki_dir,
+            thread_id="chat-thread-1",
+            model_name="gpt-5.4-mini",
+            chat_base_url="https://api.poe.com/v1",
+            reasoning_effort="low",
+            use_responses_api=False,
+            help_footer="Type normal text to chat with the wiki agent.",
+        )
+
+        help_result = chat_registry.dispatch("/help", chat_ctx)
+        assert help_result is not None
+        assert "/help" in help_result.reply
+        assert "/new" in help_result.reply
+        assert "/exit" in help_result.reply
+        assert "Type normal text" in help_result.reply
+
+        unknown_result = chat_registry.dispatch("/wat", chat_ctx)
+        assert unknown_result is not None
+        assert unknown_result.error is True
+        assert "Unknown command '/wat'" in unknown_result.reply
+
+        telegram_registry = build_telegram_slash_registry()
+        telegram_ctx = SlashCommandContext(
+            transport="telegram",
+            wiki_dir=wiki_dir,
+            thread_id="telegram:1:epoch:1",
+            model_name="gpt-5.4-mini",
+            chat_base_url="https://api.poe.com/v1",
+            reasoning_effort="low",
+            use_responses_api=False,
+            help_footer="Files → ingest into the wiki.",
+        )
+        start_result = telegram_registry.dispatch("/start@MyWikiBot", telegram_ctx)
+        assert start_result is not None
+        assert "/exit" not in start_result.reply
+        assert "Files → ingest" in start_result.reply
+        print("✓ test_slash_commands_help_and_unknown")
+
+
+def test_slash_commands_status():
+    """Verify slash status summarizes the current wiki/session state."""
+    from wiki.slash_commands import SlashCommandContext, build_shared_slash_registry
+
+    tmp = fresh_wiki()
+    try:
+        (tmp / "wiki" / "trust.md").write_text("# Trust\n\nTrust matters.", encoding="utf-8")
+        (tmp / "raw" / "notes.md").write_text("source text", encoding="utf-8")
+        (tmp / "scratch" / "work.txt").write_text("temp", encoding="utf-8")
+        (tmp / "wiki" / ".chroma").mkdir(parents=True, exist_ok=True)
+
+        registry = build_shared_slash_registry()
+        result = registry.dispatch(
+            "/status",
+            SlashCommandContext(
+                transport="telegram",
+                wiki_dir=tmp,
+                thread_id="telegram:123:epoch:4",
+                model_name="gpt-5.4-mini",
+                chat_base_url="https://api.poe.com/v1",
+                reasoning_effort="low",
+                use_responses_api=False,
+                session_id="telegram-private-123",
+                active_epoch=4,
+            ),
+        )
+
+        assert result is not None
+        assert "Session: telegram-private-123" in result.reply
+        assert "Epoch: 4" in result.reply
+        assert "Thread: telegram:123:epoch:4" in result.reply
+        assert "Pages: 1" in result.reply
+        assert "Raw sources: 1" in result.reply
+        assert "Scratch files: 1" in result.reply
+        assert "Chroma index: present" in result.reply
+        assert "Git: dirty" in result.reply
+        print("✓ test_slash_commands_status")
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_telegram_handle_update_slash_new():
+    """Verify Telegram slash commands use the shared registry and rotate the session."""
+    import os
+    import tempfile
+    from unittest.mock import MagicMock, patch
+
+    from wiki.telegram_state import TelegramSession
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+        (wiki_dir / "raw").mkdir()
+        (wiki_dir / "wiki").mkdir()
+        (wiki_dir / "scratch").mkdir()
+
+        client = MagicMock()
+        state_store = MagicMock()
+        session = TelegramSession(
+            session_id="telegram-private-42",
+            chat_id=42,
+            chat_type="private",
+            user_id=7,
+            active_epoch=1,
+            active_thread_id="telegram:42:epoch:1",
+        )
+        rotated = TelegramSession(
+            session_id="telegram-private-42",
+            chat_id=42,
+            chat_type="private",
+            user_id=7,
+            active_epoch=2,
+            active_thread_id="telegram:42:epoch:2",
+        )
+        state_store.get_or_create_session.return_value = session
+        state_store.rotate_session.return_value = rotated
+
+        update = {
+            "update_id": 999,
+            "message": {
+                "message_id": 123,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 7},
+                "text": "/new",
+            },
+        }
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki_dir):
+                with patch("wiki.commands.telegram._run_agent_turn") as mock_turn:
+                    from wiki.commands.telegram import _handle_update
+
+                    _handle_update(update, client, state_store, MagicMock(), MagicMock())
+
+                    mock_turn.assert_not_called()
+                    state_store.rotate_session.assert_called_once_with(42, reason="slash-command")
+                    sent = client.send_messages.call_args[0][1]
+                    assert "Started a fresh conversation thread" in sent
+                    assert "Epoch: 2" in sent
+                    assert "Thread: telegram:42:epoch:2" in sent
+                    print("✓ test_telegram_handle_update_slash_new")
+
+
 def test_split_telegram_text():
     """Verify Telegram replies are chunked safely."""
     from wiki.telegram_client import split_telegram_text
@@ -1319,6 +1475,9 @@ if __name__ == "__main__":
     test_reindex_observability()
     test_persistent_checkpointer_roundtrip()
     test_telegram_state_store_and_rotation()
+    test_slash_commands_help_and_unknown()
+    test_slash_commands_status()
+    test_telegram_handle_update_slash_new()
     test_split_telegram_text()
     test_telegram_download_file()
     test_build_ingest_prompt()
