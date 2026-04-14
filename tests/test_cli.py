@@ -460,6 +460,190 @@ def test_telegram_state_store_and_rotation():
         print("✓ test_telegram_state_store_and_rotation")
 
 
+def test_parse_dotenv():
+    """Verify _parse_dotenv handles KEY=VALUE, comments, quotes, export prefix."""
+    from pathlib import Path
+    import tempfile
+
+    from wiki.config import _parse_dotenv
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = Path(tmp) / "secrets.env"
+        env_file.write_text(
+            "# Bot tokens\n"
+            "TELEGRAM_BOT_TOKEN=123456:ABC-DEF\n"
+            '\n'
+            'POE_API_KEY="sk-quoted-key"\n'
+            "export OPENROUTER_API_KEY='or-single-quotes'\n"
+            "BARE_VALUE=no-quotes\n"
+            "  SPACED_KEY  =  spaced-value  \n"
+            "INVALID_LINE_NO_EQUALS\n"
+        )
+
+        result = _parse_dotenv(env_file)
+
+        assert result["TELEGRAM_BOT_TOKEN"] == "123456:ABC-DEF"
+        assert result["POE_API_KEY"] == "sk-quoted-key"
+        assert result["OPENROUTER_API_KEY"] == "or-single-quotes"
+        assert result["BARE_VALUE"] == "no-quotes"
+        assert result["SPACED_KEY"] == "spaced-value"
+        assert "INVALID_LINE_NO_EQUALS" not in result
+        assert "" not in result  # blank lines skipped
+        print("✓ test_parse_dotenv")
+
+
+def test_load_secrets_env_populates_os_environ():
+    """Verify .wiki/secrets.env is loaded into os.environ on demand."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from wiki.config import load_secrets_env
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+        secrets = wiki_dir / ".wiki" / "secrets.env"
+        secrets.parent.mkdir(parents=True, exist_ok=True)
+        secrets.write_text("TELEGRAM_BOT_TOKEN=file-token\nPOE_API_KEY=file-key\n")
+
+        # Remove from env to ensure clean state
+        with patch.dict(os.environ, {}, clear=True):
+            # Point cwd at our temp wiki
+            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+                # Reset the loaded flag so it re-reads
+                import wiki.config as cfg
+                cfg._SECRETS_LOADED = False
+
+                load_secrets_env()
+
+                assert os.environ["TELEGRAM_BOT_TOKEN"] == "file-token"
+                assert os.environ["POE_API_KEY"] == "file-key"
+                print("✓ test_load_secrets_env_populates_os_environ")
+
+
+def test_load_secrets_env_clobbers_existing():
+    """Verify .wiki/secrets.env values override existing env vars (file wins)."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from wiki.config import load_secrets_env
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+        secrets = wiki_dir / ".wiki" / "secrets.env"
+        secrets.parent.mkdir(parents=True, exist_ok=True)
+        secrets.write_text("TELEGRAM_BOT_TOKEN=from-file\n")
+
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "from-shell"}, clear=True):
+            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+                import wiki.config as cfg
+                cfg._SECRETS_LOADED = False
+
+                load_secrets_env()
+
+                assert os.environ["TELEGRAM_BOT_TOKEN"] == "from-file"
+                print("✓ test_load_secrets_env_clobbers_existing")
+
+
+def test_load_secrets_env_no_file_is_noop():
+    """Verify load_secrets_env is a no-op when .wiki/secrets.env doesn't exist."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from wiki.config import load_secrets_env
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+        # No .wiki/secrets.env created
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+                import wiki.config as cfg
+                cfg._SECRETS_LOADED = False
+
+                load_secrets_env()  # should not raise
+
+                assert "TELEGRAM_BOT_TOKEN" not in os.environ
+                print("✓ test_load_secrets_env_no_file_is_noop")
+
+
+def test_require_telegram_bot_token_from_file():
+    """Verify require_telegram_bot_token reads from .wiki/secrets.env."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from wiki.config import require_telegram_bot_token
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+        secrets = wiki_dir / ".wiki" / "secrets.env"
+        secrets.parent.mkdir(parents=True, exist_ok=True)
+        secrets.write_text("TELEGRAM_BOT_TOKEN=tok-from-file\n")
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+                import wiki.config as cfg
+                cfg._SECRETS_LOADED = False
+
+                token = require_telegram_bot_token()
+                assert token == "tok-from-file"
+                print("✓ test_require_telegram_bot_token_from_file")
+
+
+def test_require_telegram_bot_token_from_env_fallback():
+    """Verify TELEGRAM_BOT_TOKEN env var works when no secrets.env exists."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from wiki.config import require_telegram_bot_token
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "tok-from-env"}, clear=True):
+            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+                import wiki.config as cfg
+                cfg._SECRETS_LOADED = False
+
+                token = require_telegram_bot_token()
+                assert token == "tok-from-env"
+                print("✓ test_require_telegram_bot_token_from_env_fallback")
+
+
+def test_require_telegram_bot_token_missing_exits():
+    """Verify require_telegram_bot_token exits when token is nowhere."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from wiki.config import require_telegram_bot_token
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wiki_dir = Path(tmp)
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+                import wiki.config as cfg
+                cfg._SECRETS_LOADED = False
+
+                try:
+                    require_telegram_bot_token()
+                    assert False, "Should have raised SystemExit"
+                except SystemExit as exc:
+                    assert exc.code == 1
+                    print("✓ test_require_telegram_bot_token_missing_exits")
+
+
 def test_split_telegram_text():
     """Verify Telegram replies are chunked safely."""
     from wiki.telegram_client import split_telegram_text
@@ -482,6 +666,13 @@ if __name__ == "__main__":
     test_git_tools()
     test_linter_middleware()
     test_chunking_split()
+    test_parse_dotenv()
+    test_load_secrets_env_populates_os_environ()
+    test_load_secrets_env_clobbers_existing()
+    test_load_secrets_env_no_file_is_noop()
+    test_require_telegram_bot_token_from_file()
+    test_require_telegram_bot_token_from_env_fallback()
+    test_require_telegram_bot_token_missing_exits()
     test_agent_construction()
     test_observability_store()
     test_observability_init_run()

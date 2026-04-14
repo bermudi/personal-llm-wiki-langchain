@@ -8,6 +8,58 @@ from pathlib import Path
 
 from langchain_openai import ChatOpenAI
 
+
+# ── .wiki/secrets.env loading ──────────────────────────────────────────
+
+_SECRETS_LOADED = False
+
+
+def _parse_dotenv(path: Path) -> dict[str, str]:
+    """Parse a simple KEY=VALUE dotenv file.
+
+    - Lines starting with ``#`` are comments.
+    - Blank lines are ignored.
+    - Leading/trailing whitespace and quotes around values are stripped.
+    - ``export `` prefix is silently removed.
+    """
+    env: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):]
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key:
+            env[key] = value
+    return env
+
+
+def load_secrets_env() -> None:
+    """Load ``.wiki/secrets.env`` into ``os.environ`` if it exists.
+
+    Idempotent — only loads once per process.
+    Values from the file **clobber** any existing env vars so that
+    ``.wiki/secrets.env`` is the canonical source.  This lets users run
+    multiple wikis with different tokens from the same shell.
+    """
+    global _SECRETS_LOADED
+    if _SECRETS_LOADED:
+        return
+    _SECRETS_LOADED = True
+
+    secrets_path = Path.cwd() / ".wiki" / "secrets.env"
+    if not secrets_path.is_file():
+        return
+
+    for key, value in _parse_dotenv(secrets_path).items():
+        os.environ[key] = value
+
+
 # Required wiki directories
 WIKI_DIRS = ("raw", "wiki", "scratch")
 
@@ -22,28 +74,37 @@ DEFAULT_EMBED_MODEL = "perplexity/pplx-embed-v1-4b"
 
 
 def require_chat_api_key() -> str:
-    """Load chat API key. Defaults to POE_API_KEY."""
+    """Load chat API key. Resolution: ``.wiki/secrets.env`` → ``POE_API_KEY`` env var → error."""
+    load_secrets_env()
     key = os.environ.get("POE_API_KEY")
     if not key:
-        print("POE_API_KEY environment variable is required", file=sys.stderr)
+        print("POE_API_KEY not found. Set it in .wiki/secrets.env or as an environment variable.", file=sys.stderr)
         raise SystemExit(1)
     return key
 
 
 def require_embed_api_key() -> str:
-    """Load embedding API key. Defaults to OPENROUTER_API_KEY."""
+    """Load embedding API key. Resolution: ``.wiki/secrets.env`` → ``OPENROUTER_API_KEY`` env var → error."""
+    load_secrets_env()
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
-        print("OPENROUTER_API_KEY environment variable is required", file=sys.stderr)
+        print("OPENROUTER_API_KEY not found. Set it in .wiki/secrets.env or as an environment variable.", file=sys.stderr)
         raise SystemExit(1)
     return key
 
 
 def require_telegram_bot_token() -> str:
-    """Load Telegram bot token for polling mode."""
+    """Load Telegram bot token for polling mode.
+
+    Resolution order: ``.wiki/secrets.env`` → ``TELEGRAM_BOT_TOKEN`` env var → error.
+    """
+    load_secrets_env()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
-        print("TELEGRAM_BOT_TOKEN environment variable is required", file=sys.stderr)
+        print(
+            "TELEGRAM_BOT_TOKEN not found. Set it in .wiki/secrets.env or as an environment variable.",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
     return token
 
