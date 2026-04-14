@@ -10,6 +10,12 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+telegram_app = typer.Typer(
+    help="Telegram transport for the wiki agent.",
+    no_args_is_help=True,
+)
+app.add_typer(telegram_app, name="telegram")
+
 
 @app.command()
 def init() -> None:
@@ -56,6 +62,17 @@ def reindex() -> None:
     from wiki.commands.reindex import run_reindex
 
     run_reindex()
+
+
+@telegram_app.command("poll")
+def telegram_poll(
+    once: bool = typer.Option(False, "--once", help="Process a single polling batch and exit."),
+    timeout: int = typer.Option(30, min=1, max=50, help="Telegram long-poll timeout in seconds."),
+) -> None:
+    """Long-poll Telegram and route private chat messages into the wiki agent."""
+    from wiki.commands.telegram import run_poll
+
+    run_poll(once=once, timeout=timeout)
 
 
 if __name__ == "__main__":

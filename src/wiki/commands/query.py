@@ -51,7 +51,7 @@ Answer directly and cite your sources.
             {"messages": [{"role": "user", "content": prompt}]},
             config={
                 "configurable": {"thread_id": thread_id},
-                "recursion_limit": 15,
+                "recursion_limit": 100,
             },
             stream_mode="messages",
         )

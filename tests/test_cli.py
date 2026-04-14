@@ -370,6 +370,109 @@ def test_observability_init_run():
             obs_mod.get_obs_db_path = original_fn
 
 
+def test_persistent_checkpointer_roundtrip():
+    """Verify persistent checkpoints survive process-like reopen."""
+    import tempfile
+
+    from langgraph.graph import END, START, StateGraph
+    from typing_extensions import TypedDict
+
+    from wiki.checkpointing import PersistentCheckpointer
+
+    class State(TypedDict):
+        value: str
+
+    def respond(state: State) -> dict:
+        return {"value": state["value"] + "!"}
+
+    def build_graph(checkpointer):
+        builder = StateGraph(State)
+        builder.add_node("respond", respond)
+        builder.add_edge(START, "respond")
+        builder.add_edge("respond", END)
+        return builder.compile(checkpointer=checkpointer)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / ".wiki" / "checkpoints.sqlite"
+        config = {"configurable": {"thread_id": "telegram:1:epoch:1"}}
+
+        manager = PersistentCheckpointer(db_path)
+        graph = build_graph(manager.saver)
+        graph.invoke({"value": "ping"}, config)
+        manager.close()
+
+        manager = PersistentCheckpointer(db_path)
+        graph = build_graph(manager.saver)
+        state = graph.get_state(config)
+        manager.close()
+
+        assert state.values["value"] == "ping!"
+        print("✓ test_persistent_checkpointer_roundtrip")
+
+
+def test_telegram_state_store_and_rotation():
+    """Verify Telegram state storage tracks cursors, sessions, epochs, and events."""
+    import sqlite3
+    import tempfile
+
+    from wiki.telegram_state import TelegramStateStore
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / ".wiki" / "telegram.db"
+        store = TelegramStateStore(db_path)
+
+        assert store.get_cursor("bot") is None
+        store.set_cursor("bot", 42)
+        assert store.get_cursor("bot") == 42
+
+        session = store.get_or_create_session(chat_id=123, chat_type="private", user_id=456)
+        assert session.active_epoch == 1
+        assert session.active_thread_id == "telegram:123:epoch:1"
+
+        store.record_event(
+            session=session,
+            role="user",
+            content="hello",
+            telegram_update_id=1,
+            telegram_message_id=2,
+        )
+
+        rotated = store.rotate_session(123, reason="manual-reset")
+        assert rotated.active_epoch == 2
+        assert rotated.active_thread_id == "telegram:123:epoch:2"
+
+        store.close()
+
+        conn = sqlite3.connect(str(db_path))
+        epochs = conn.execute(
+            "SELECT epoch, thread_id, close_reason FROM telegram_epochs ORDER BY epoch"
+        ).fetchall()
+        events = conn.execute(
+            "SELECT role, content FROM telegram_events ORDER BY id"
+        ).fetchall()
+        conn.close()
+
+        assert epochs == [
+            (1, "telegram:123:epoch:1", "manual-reset"),
+            (2, "telegram:123:epoch:2", None),
+        ]
+        assert events == [("user", "hello")]
+        print("✓ test_telegram_state_store_and_rotation")
+
+
+def test_split_telegram_text():
+    """Verify Telegram replies are chunked safely."""
+    from wiki.telegram_client import split_telegram_text
+
+    text = ("hello world\n" * 500).strip()
+    chunks = split_telegram_text(text, limit=200)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 200 for chunk in chunks)
+    assert all(chunk.strip() for chunk in chunks)
+    print("✓ test_split_telegram_text")
+
+
 if __name__ == "__main__":
     print("Running wiki CLI tests...\n")
     test_init_creates_structure()
@@ -382,4 +485,7 @@ if __name__ == "__main__":
     test_agent_construction()
     test_observability_store()
     test_observability_init_run()
+    test_persistent_checkpointer_roundtrip()
+    test_telegram_state_store_and_rotation()
+    test_split_telegram_text()
     print("\nAll tests passed!")

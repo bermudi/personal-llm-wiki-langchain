@@ -5,9 +5,10 @@ A personal knowledge base maintained by an AI agent. Drop raw sources into `raw/
 ## Quick Start
 
 ```bash
-# Set up API keys (both required)
+# Set up API keys (chat + embeddings required, Telegram optional)
 export POE_API_KEY=poe-xxxxx-your-key           # Chat — uses your subscription credits
 export OPENROUTER_API_KEY=sk-or-v1-your-key     # Embeddings — cheap pay-as-you-go
+export TELEGRAM_BOT_TOKEN=123456:telegram-token # Optional — enables `wiki telegram poll`
 
 # Initialize a wiki workspace
 mkdir my-wiki && cd my-wiki
@@ -23,6 +24,9 @@ uv run wiki query "What did they say about institutional trust?"
 # Interactive chat
 uv run wiki chat
 
+# Telegram long polling
+uv run wiki telegram poll
+
 # Rebuild the search index
 uv run wiki reindex
 ```
@@ -35,6 +39,7 @@ uv run wiki reindex
 | `wiki ingest <path>` | Process a source file into wiki pages |
 | `wiki query "<question>"` | One-shot question with citations |
 | `wiki chat` | Interactive multi-turn conversation |
+| `wiki telegram poll` | Long-poll Telegram private chats into the wiki agent |
 | `wiki reindex` | Rebuild Chroma vector store |
 
 ## Architecture
@@ -46,6 +51,7 @@ uv run wiki reindex
 - **Chunking**: Pipeline tools for long sources (split → extract → group → synthesize)
 - **Validation**: Middleware linter for index.md and log.md format
 - **HITL**: Configurable approval gates on ingest (`--approval=plan,page,commit,none`)
+- **Telegram**: Optional long-poll transport with durable SQLite session state and LangGraph checkpoints
 
 ## Project Structure
 

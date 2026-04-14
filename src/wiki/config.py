@@ -39,6 +39,15 @@ def require_embed_api_key() -> str:
     return key
 
 
+def require_telegram_bot_token() -> str:
+    """Load Telegram bot token for polling mode."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        print("TELEGRAM_BOT_TOKEN environment variable is required", file=sys.stderr)
+        raise SystemExit(1)
+    return token
+
+
 def get_chat_base_url() -> str:
     return os.environ.get("WIKI_CHAT_BASE_URL", DEFAULT_CHAT_BASE_URL)
 

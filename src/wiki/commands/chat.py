@@ -37,7 +37,7 @@ def run_chat(*, no_tui: bool = False) -> None:
 
     config = {
         "configurable": {"thread_id": thread_id},
-        "recursion_limit": 15,
+        "recursion_limit": 100,
     }
 
     try:
