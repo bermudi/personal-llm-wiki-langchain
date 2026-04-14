@@ -836,120 +836,120 @@ def test_telegram_state_store_and_rotation():
         print("✓ test_telegram_state_store_and_rotation")
 
 
-def test_parse_dotenv():
-    """Verify _parse_dotenv handles KEY=VALUE, comments, quotes, export prefix."""
+def test_dotenv_loading():
+    """Verify .wiki/.env loads correctly via python-dotenv."""
+    import os
     from pathlib import Path
     import tempfile
 
-    from wiki.config import _parse_dotenv
+    from wiki.config import _load_dotenv_once
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = Path(tmp) / "secrets.env"
+        wiki_dir = Path(tmp) / ".wiki"
+        wiki_dir.mkdir()
+        env_file = wiki_dir / ".env"
         env_file.write_text(
             "# Bot tokens\n"
             "TELEGRAM_BOT_TOKEN=123456:ABC-DEF\n"
             '\n'
             'POE_API_KEY="sk-quoted-key"\n'
-            "export OPENROUTER_API_KEY='or-single-quotes'\n"
-            "BARE_VALUE=no-quotes\n"
-            "  SPACED_KEY  =  spaced-value  \n"
-            "INVALID_LINE_NO_EQUALS\n"
+            "OPENROUTER_API_KEY=or-bare-key\n"
         )
 
-        result = _parse_dotenv(env_file)
+        # Patch cwd so config finds .wiki/.env
+        import wiki.config
+        orig_cwd = Path.cwd
+        wiki.config.Path.cwd = lambda: Path(tmp)  # type: ignore[attr-defined]
+        wiki.config._DOTENV_LOADED = False
 
-        assert result["TELEGRAM_BOT_TOKEN"] == "123456:ABC-DEF"
-        assert result["POE_API_KEY"] == "sk-quoted-key"
-        assert result["OPENROUTER_API_KEY"] == "or-single-quotes"
-        assert result["BARE_VALUE"] == "no-quotes"
-        assert result["SPACED_KEY"] == "spaced-value"
-        assert "INVALID_LINE_NO_EQUALS" not in result
-        assert "" not in result  # blank lines skipped
-        print("✓ test_parse_dotenv")
+        try:
+            _load_dotenv_once()
+            assert os.environ["TELEGRAM_BOT_TOKEN"] == "123456:ABC-DEF"
+            assert os.environ["POE_API_KEY"] == "sk-quoted-key"
+            assert os.environ["OPENROUTER_API_KEY"] == "or-bare-key"
+            print("✓ test_dotenv_loading")
+        finally:
+            os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            os.environ.pop("POE_API_KEY", None)
+            os.environ.pop("OPENROUTER_API_KEY", None)
+            wiki.config.Path.cwd = orig_cwd  # type: ignore[attr-defined]
 
 
-def test_load_secrets_env_populates_os_environ():
-    """Verify .wiki/secrets.env is loaded into os.environ on demand."""
+def _reset_dotenv():
+    """Reset the dotenv loaded flag so tests re-read the file."""
+    import wiki.config as cfg
+    cfg._DOTENV_LOADED = False
+
+
+def test_dotenv_populates_os_environ():
+    """Verify .wiki/.env is loaded into os.environ on demand."""
     import os
     import tempfile
     from pathlib import Path
     from unittest.mock import patch
 
-    from wiki.config import load_secrets_env
-
     with tempfile.TemporaryDirectory() as tmp:
         wiki_dir = Path(tmp)
-        secrets = wiki_dir / ".wiki" / "secrets.env"
-        secrets.parent.mkdir(parents=True, exist_ok=True)
-        secrets.write_text("TELEGRAM_BOT_TOKEN=file-token\nPOE_API_KEY=file-key\n")
+        env_file = wiki_dir / ".wiki" / ".env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text("TELEGRAM_BOT_TOKEN=file-token\nPOE_API_KEY=file-key\n")
 
-        # Remove from env to ensure clean state
         with patch.dict(os.environ, {}, clear=True):
-            # Point cwd at our temp wiki
             with patch("wiki.config.Path.cwd", return_value=wiki_dir):
-                # Reset the loaded flag so it re-reads
-                import wiki.config as cfg
-                cfg._SECRETS_LOADED = False
-
-                load_secrets_env()
+                _reset_dotenv()
+                from wiki.config import _load_dotenv_once
+                _load_dotenv_once()
 
                 assert os.environ["TELEGRAM_BOT_TOKEN"] == "file-token"
                 assert os.environ["POE_API_KEY"] == "file-key"
-                print("✓ test_load_secrets_env_populates_os_environ")
+                print("✓ test_dotenv_populates_os_environ")
 
 
-def test_load_secrets_env_clobbers_existing():
-    """Verify .wiki/secrets.env values override existing env vars (file wins)."""
+def test_dotenv_clobbers_existing():
+    """Verify .wiki/.env values override existing env vars (file wins)."""
     import os
     import tempfile
     from pathlib import Path
     from unittest.mock import patch
 
-    from wiki.config import load_secrets_env
-
     with tempfile.TemporaryDirectory() as tmp:
         wiki_dir = Path(tmp)
-        secrets = wiki_dir / ".wiki" / "secrets.env"
-        secrets.parent.mkdir(parents=True, exist_ok=True)
-        secrets.write_text("TELEGRAM_BOT_TOKEN=from-file\n")
+        env_file = wiki_dir / ".wiki" / ".env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text("TELEGRAM_BOT_TOKEN=from-file\n")
 
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "from-shell"}, clear=True):
             with patch("wiki.config.Path.cwd", return_value=wiki_dir):
-                import wiki.config as cfg
-                cfg._SECRETS_LOADED = False
-
-                load_secrets_env()
+                _reset_dotenv()
+                from wiki.config import _load_dotenv_once
+                _load_dotenv_once()
 
                 assert os.environ["TELEGRAM_BOT_TOKEN"] == "from-file"
-                print("✓ test_load_secrets_env_clobbers_existing")
+                print("✓ test_dotenv_clobbers_existing")
 
 
-def test_load_secrets_env_no_file_is_noop():
-    """Verify load_secrets_env is a no-op when .wiki/secrets.env doesn't exist."""
+def test_dotenv_no_file_is_noop():
+    """Verify dotenv loading is a no-op when .wiki/.env doesn't exist."""
     import os
     import tempfile
     from pathlib import Path
     from unittest.mock import patch
 
-    from wiki.config import load_secrets_env
-
     with tempfile.TemporaryDirectory() as tmp:
         wiki_dir = Path(tmp)
-        # No .wiki/secrets.env created
 
         with patch.dict(os.environ, {}, clear=True):
             with patch("wiki.config.Path.cwd", return_value=wiki_dir):
-                import wiki.config as cfg
-                cfg._SECRETS_LOADED = False
-
-                load_secrets_env()  # should not raise
+                _reset_dotenv()
+                from wiki.config import _load_dotenv_once
+                _load_dotenv_once()  # should not raise
 
                 assert "TELEGRAM_BOT_TOKEN" not in os.environ
-                print("✓ test_load_secrets_env_no_file_is_noop")
+                print("✓ test_dotenv_no_file_is_noop")
 
 
 def test_require_telegram_bot_token_from_file():
-    """Verify require_telegram_bot_token reads from .wiki/secrets.env."""
+    """Verify require_telegram_bot_token reads from .wiki/.env."""
     import os
     import tempfile
     from pathlib import Path
@@ -959,14 +959,13 @@ def test_require_telegram_bot_token_from_file():
 
     with tempfile.TemporaryDirectory() as tmp:
         wiki_dir = Path(tmp)
-        secrets = wiki_dir / ".wiki" / "secrets.env"
-        secrets.parent.mkdir(parents=True, exist_ok=True)
-        secrets.write_text("TELEGRAM_BOT_TOKEN=tok-from-file\n")
+        env_file = wiki_dir / ".wiki" / ".env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text("TELEGRAM_BOT_TOKEN=tok-from-file\n")
 
         with patch.dict(os.environ, {}, clear=True):
             with patch("wiki.config.Path.cwd", return_value=wiki_dir):
-                import wiki.config as cfg
-                cfg._SECRETS_LOADED = False
+                _reset_dotenv()
 
                 token = require_telegram_bot_token()
                 assert token == "tok-from-file"
@@ -974,7 +973,7 @@ def test_require_telegram_bot_token_from_file():
 
 
 def test_require_telegram_bot_token_from_env_fallback():
-    """Verify TELEGRAM_BOT_TOKEN env var works when no secrets.env exists."""
+    """Verify TELEGRAM_BOT_TOKEN env var works when no .env file exists."""
     import os
     import tempfile
     from pathlib import Path
@@ -987,8 +986,7 @@ def test_require_telegram_bot_token_from_env_fallback():
 
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "tok-from-env"}, clear=True):
             with patch("wiki.config.Path.cwd", return_value=wiki_dir):
-                import wiki.config as cfg
-                cfg._SECRETS_LOADED = False
+                _reset_dotenv()
 
                 token = require_telegram_bot_token()
                 assert token == "tok-from-env"
@@ -1009,8 +1007,7 @@ def test_require_telegram_bot_token_missing_exits():
 
         with patch.dict(os.environ, {}, clear=True):
             with patch("wiki.config.Path.cwd", return_value=wiki_dir):
-                import wiki.config as cfg
-                cfg._SECRETS_LOADED = False
+                _reset_dotenv()
 
                 try:
                     require_telegram_bot_token()
@@ -1460,10 +1457,10 @@ if __name__ == "__main__":
     test_chunking_split()
     test_chunk_review_graph()
     test_chunk_review_graph_observability()
-    test_parse_dotenv()
-    test_load_secrets_env_populates_os_environ()
-    test_load_secrets_env_clobbers_existing()
-    test_load_secrets_env_no_file_is_noop()
+    test_dotenv_loading()
+    test_dotenv_populates_os_environ()
+    test_dotenv_clobbers_existing()
+    test_dotenv_no_file_is_noop()
     test_require_telegram_bot_token_from_file()
     test_require_telegram_bot_token_from_env_fallback()
     test_require_telegram_bot_token_missing_exits()

@@ -7,6 +7,8 @@
 # Wiki runtime
 .obsidian/
 wiki/.chroma/
+.wiki/secrets.env
+.wiki/.env
 
 # Embeddings (derived)
 *.egg-info/

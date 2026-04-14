@@ -4,91 +4,90 @@ from __future__ import annotations
 
 import os
 import sys
+import tomllib
 from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
-# ── .wiki/secrets.env loading ──────────────────────────────────────────
+# ── .wiki/.env (secrets) ───────────────────────────────────────────────
 
-_SECRETS_LOADED = False
-
-
-def _parse_dotenv(path: Path) -> dict[str, str]:
-    """Parse a simple KEY=VALUE dotenv file.
-
-    - Lines starting with ``#`` are comments.
-    - Blank lines are ignored.
-    - Leading/trailing whitespace and quotes around values are stripped.
-    - ``export `` prefix is silently removed.
-    """
-    env: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):]
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip("\"'")
-        if key:
-            env[key] = value
-    return env
+_DOTENV_LOADED = False
 
 
-def load_secrets_env() -> None:
-    """Load ``.wiki/secrets.env`` into ``os.environ`` if it exists.
+def _load_dotenv_once() -> None:
+    """Load ``.wiki/.env`` into ``os.environ`` if it exists.
 
     Idempotent — only loads once per process.
     Values from the file **clobber** any existing env vars so that
-    ``.wiki/secrets.env`` is the canonical source.  This lets users run
+    ``.wiki/.env`` is the canonical source for secrets.  This lets users run
     multiple wikis with different tokens from the same shell.
     """
-    global _SECRETS_LOADED
-    if _SECRETS_LOADED:
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
         return
-    _SECRETS_LOADED = True
+    _DOTENV_LOADED = True
 
-    secrets_path = Path.cwd() / ".wiki" / "secrets.env"
-    if not secrets_path.is_file():
-        return
+    env_path = Path.cwd() / ".wiki" / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=True)
 
-    for key, value in _parse_dotenv(secrets_path).items():
-        os.environ[key] = value
+
+# ── .wiki/config.toml (non-secret config) ───────────────────────────────
+
+_CONFIG: dict | None = None
+
+
+def _load_config() -> dict:
+    """Load ``.wiki/config.toml`` if it exists. Cached per process."""
+    global _CONFIG
+    if _CONFIG is not None:
+        return _CONFIG
+
+    config_path = Path.cwd() / ".wiki" / "config.toml"
+    if config_path.is_file():
+        with open(config_path, "rb") as f:
+            _CONFIG = tomllib.load(f)
+    else:
+        _CONFIG = {}
+    return _CONFIG
+
+
+def _config_value(section: str, key: str, default: str | None = None) -> str | None:
+    """Read a value from config.toml. Returns ``default`` if not set."""
+    cfg = _load_config()
+    return cfg.get(section, {}).get(key, default)
 
 
 # Required wiki directories
 WIKI_DIRS = ("raw", "wiki", "scratch")
 
-# Chat provider (Poe by default — uses your subscription credits)
+# Fallback defaults (used when neither config.toml nor env vars set a value)
 DEFAULT_CHAT_BASE_URL = "https://api.poe.com/v1"
 DEFAULT_CHAT_MODEL = "gpt-5.4-mini"
 DEFAULT_REASONING_EFFORT = "low"
 
-# Embedding provider (OpenRouter by default — cheap pay-as-you-go)
 DEFAULT_EMBED_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_EMBED_MODEL = "perplexity/pplx-embed-v1-4b"
 
 
 def require_chat_api_key() -> str:
-    """Load chat API key. Resolution: ``.wiki/secrets.env`` → ``POE_API_KEY`` env var → error."""
-    load_secrets_env()
+    """Load chat API key. Resolution: ``.wiki/.env`` → ``POE_API_KEY`` env var → error."""
+    _load_dotenv_once()
     key = os.environ.get("POE_API_KEY")
     if not key:
-        print("POE_API_KEY not found. Set it in .wiki/secrets.env or as an environment variable.", file=sys.stderr)
+        print("POE_API_KEY not found. Set it in .wiki/.env or as an environment variable.", file=sys.stderr)
         raise SystemExit(1)
     return key
 
 
 def require_embed_api_key() -> str:
-    """Load embedding API key. Resolution: ``.wiki/secrets.env`` → ``OPENROUTER_API_KEY`` env var → error."""
-    load_secrets_env()
+    """Load embedding API key. Resolution: ``.wiki/.env`` → ``OPENROUTER_API_KEY`` env var → error."""
+    _load_dotenv_once()
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
-        print("OPENROUTER_API_KEY not found. Set it in .wiki/secrets.env or as an environment variable.", file=sys.stderr)
+        print("OPENROUTER_API_KEY not found. Set it in .wiki/.env or as an environment variable.", file=sys.stderr)
         raise SystemExit(1)
     return key
 
@@ -96,13 +95,13 @@ def require_embed_api_key() -> str:
 def require_telegram_bot_token() -> str:
     """Load Telegram bot token for polling mode.
 
-    Resolution order: ``.wiki/secrets.env`` → ``TELEGRAM_BOT_TOKEN`` env var → error.
+    Resolution order: ``.wiki/.env`` → ``TELEGRAM_BOT_TOKEN`` env var → error.
     """
-    load_secrets_env()
+    _load_dotenv_once()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         print(
-            "TELEGRAM_BOT_TOKEN not found. Set it in .wiki/secrets.env or as an environment variable.",
+            "TELEGRAM_BOT_TOKEN not found. Set it in .wiki/.env or as an environment variable.",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -110,27 +109,28 @@ def require_telegram_bot_token() -> str:
 
 
 def get_chat_base_url() -> str:
-    return os.environ.get("WIKI_CHAT_BASE_URL", DEFAULT_CHAT_BASE_URL)
+    return os.environ.get("WIKI_CHAT_BASE_URL", _config_value("chat", "base_url", DEFAULT_CHAT_BASE_URL))  # type: ignore[return-value]
 
 
 def get_model_name() -> str:
-    return os.environ.get("WIKI_MODEL", DEFAULT_CHAT_MODEL)
+    return os.environ.get("WIKI_MODEL", _config_value("chat", "model", DEFAULT_CHAT_MODEL))  # type: ignore[return-value]
 
 
 def get_embed_base_url() -> str:
-    return os.environ.get("WIKI_EMBED_BASE_URL", DEFAULT_EMBED_BASE_URL)
+    return os.environ.get("WIKI_EMBED_BASE_URL", _config_value("embed", "base_url", DEFAULT_EMBED_BASE_URL))  # type: ignore[return-value]
 
 
 def get_embedding_model() -> str:
-    return os.environ.get("WIKI_EMBED_MODEL", DEFAULT_EMBED_MODEL)
+    return os.environ.get("WIKI_EMBED_MODEL", _config_value("embed", "model", DEFAULT_EMBED_MODEL))  # type: ignore[return-value]
 
 
 def get_reasoning_effort() -> str | None:
     val = os.environ.get("WIKI_REASONING_EFFORT")
-    # Empty string means "no reasoning" (explicit override to disable)
-    if val == "" or val == "none":
-        return None
-    return val if val is not None else DEFAULT_REASONING_EFFORT
+    if val is not None:
+        # Empty string means "no reasoning" (explicit override to disable)
+        return None if val in ("", "none") else val
+    from_toml = _config_value("chat", "reasoning_effort", DEFAULT_REASONING_EFFORT)
+    return None if from_toml in ("", "none") else from_toml
 
 
 def get_use_responses_api() -> bool:

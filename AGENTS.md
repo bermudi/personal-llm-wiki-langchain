@@ -23,12 +23,28 @@ This project uses skills that contain up-to-date patterns and working reference 
 
 ## Environment Setup
 
-Required environment variables:
+Secrets go in `.wiki/.env` (gitignored):
 ```bash
 POE_API_KEY           # Chat completions — uses your Poe subscription credits
 OPENROUTER_API_KEY    # Embeddings — cheap pay-as-you-go (~$0.02/1M tokens)
+```
 
-# Optional overrides
+Non-secret config goes in `.wiki/config.toml` (committable):
+```toml
+[chat]
+model = "gpt-5.4-mini"
+base_url = "https://api.poe.com/v1"
+reasoning_effort = "low"
+
+[embed]
+model = "perplexity/pplx-embed-v1-4b"
+base_url = "https://openrouter.ai/api/v1"
+```
+
+Resolution cascade: **code defaults → `config.toml` → env vars**.
+
+Env var overrides (escape hatch):
+```bash
 WIKI_MODEL            # Default: gpt-5.4-mini
 WIKI_CHAT_BASE_URL    # Default: https://api.poe.com/v1
 WIKI_EMBED_MODEL      # Default: perplexity/pplx-embed-v1-4b

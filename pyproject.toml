@@ -14,6 +14,7 @@ dependencies = [
     "langchain-openai>=1.1.12",
     "langgraph>=1.1.6",
     "langgraph-checkpoint-sqlite>=3.0.3",
+    "python-dotenv>=1.2.2",
     "rich>=15.0.0",
     "textual>=8.2.3",
     "typer>=0.24.1",
