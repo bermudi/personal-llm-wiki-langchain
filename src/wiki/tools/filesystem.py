@@ -7,6 +7,8 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from wiki.tools.git import _git
+
 
 def _resolve(path: str) -> Path:
     """Resolve a path relative to cwd."""
@@ -43,6 +45,7 @@ def write_file(path: str, content: str) -> str:
     resolved = _resolve(path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content, encoding="utf-8")
+    _git("add", path)
     return f"Wrote {len(content)} chars to {path}"
 
 
@@ -71,6 +74,7 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
 
     new_content = content.replace(old_text, new_text)
     resolved.write_text(new_content, encoding="utf-8")
+    _git("add", path)
     return f"Edited {path}: replaced {len(old_text)} chars with {len(new_text)} chars"
 
 

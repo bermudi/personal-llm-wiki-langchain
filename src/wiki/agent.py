@@ -22,7 +22,8 @@ The wiki has three layers:
 ## Git Convention
 
 - Always check `git_status` before modifying wiki files. Uncommitted changes are human edits — they are authoritative. Integrate your work around them.
-- Commit atomically after each operation using `git_commit` with the pattern: `<operation>: <description>`
+- Write/edit tools automatically stage changed files. Call `git_commit` when an operation is complete to seal the commit. Commits only include files you wrote — nothing else gets swept in.
+- Commit messages follow the pattern: `<operation>: <description>`
 - Operations: ingest, query, lint, schema, bootstrap
 
 ## Page Filing

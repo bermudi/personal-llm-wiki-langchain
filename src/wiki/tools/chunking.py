@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 
 from wiki.chunking_core import load_source_chunks
 from wiki.ingest_graph import run_chunk_review_graph
+from wiki.tools.git import _git
 
 
 @tool
@@ -42,6 +43,7 @@ def split_source(path: str, chunk_size: int = 5000) -> str:
         chunk_path.write_text(chunk.text, encoding="utf-8")
         chunk_paths.append(f"scratch/{source_path.stem}/{chunk.chunk_id}.md")
 
+    _git("add", "scratch")
     return (
         f"Split {total_words} words into {len(chunks)} chunks ({method}):\n"
         + "\n".join(chunk_paths)
@@ -88,6 +90,11 @@ def review_long_source(path: str, chunk_size: int = 1500, max_retries: int = 1) 
     finally:
         if obs_store is not None:
             obs_store.close()
+
+    # Stage everything the graph wrote to scratch/
+    if result.artifact_dir:
+        source_slug = Path(result.source_path).stem
+        _git("add", f"scratch/{source_slug}")
 
     notes = "\n".join(f"- {note}" for note in result.review_notes) or "- No review notes"
     drafts = "\n".join(f"- {draft_path}" for draft_path in result.draft_paths) or "- No drafts generated"

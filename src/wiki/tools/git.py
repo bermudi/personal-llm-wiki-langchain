@@ -34,21 +34,19 @@ def git_status() -> str:
 
 @tool
 def git_commit(message: str) -> str:
-    """Stage all changes and commit with the given message.
+    """Commit staged changes with the given message.
 
+    Write/edit tools stage files as they go — this just seals the index.
     The message should follow the pattern: <operation>: <description>
     For example: "ingest: podcast-guest-topic" or "query: comparison of X and Y"
 
     Args:
         message: Commit message following the operation pattern.
     """
-    # Stage all changes
-    _git("add", "-A")
-
-    # Check if there's anything to commit
-    status = _git("status", "--porcelain")
-    if not status:
-        return "Nothing to commit. Working tree clean."
+    # Check if there's anything staged to commit
+    diff = _git("diff", "--cached", "--name-only")
+    if not diff:
+        return "Nothing to commit. No files staged."
 
     result = subprocess.run(
         ["git", "commit", "-m", message],
