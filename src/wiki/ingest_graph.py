@@ -266,12 +266,6 @@ def _obs_embed(
     return vectors
 
 
-def _next_turn(state: ChunkReviewState) -> int:
-    """Bump and return the model turn counter."""
-    current = state.get("_model_turn", 0) or 0
-    return current + 1
-
-
 def _extract_json_blob(text: str) -> dict:
     """Extract the first JSON object from a model response."""
     text = text.strip()
@@ -665,7 +659,7 @@ def build_chunk_review_graph(
         }
 
     def embed_and_cluster(state: ChunkReviewState) -> dict:
-        turn = _next_turn(state)
+        turn = (state.get("_model_turn", 0) or 0) + 1
         texts = [chunk.text for chunk in state["chunks"]]
         vectors = _obs_embed(
             embeddings, texts,
@@ -689,11 +683,10 @@ def build_chunk_review_graph(
         summaries: list[ChunkSummary] = []
         summary_dir = Path(state["artifact_dir"]) / "summaries"
         summary_dir.mkdir(parents=True, exist_ok=True)
+        base_turn = (state.get("_model_turn", 0) or 0)
         for chunk in state["chunks"]:
             prompt = _summary_prompt(chunk)
-            turn = _next_turn(state) if not summaries else _next_turn(state)
-            # Each chunk summary is a separate model call with its own turn
-            turn = (state.get("_model_turn", 0) or 0) + len(summaries) + 1
+            turn = base_turn + len(summaries) + 1
             try:
                 raw = _obs_invoke_text(
                     model, prompt,
@@ -710,11 +703,11 @@ def build_chunk_review_graph(
             _write_json(summary_dir / f"{chunk.chunk_id}.json", summary)
         return {
             "summaries": summaries,
-            "_model_turn": (state.get("_model_turn", 0) or 0) + len(summaries),
+            "_model_turn": base_turn + len(summaries),
         }
 
     def review_groups(state: ChunkReviewState) -> dict:
-        turn = _next_turn(state)
+        turn = (state.get("_model_turn", 0) or 0) + 1
         prompt = _review_prompt(
             state=state,
             summaries=state["summaries"],
