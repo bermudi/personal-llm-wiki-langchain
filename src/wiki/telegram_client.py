@@ -43,13 +43,16 @@ class TelegramClient:
     """Tiny Telegram Bot API wrapper using the stdlib only."""
 
     def __init__(self, token: str) -> None:
-        self.token = token
-        self.base_url = f"https://api.telegram.org/bot{token}"
+        self._token = token
+        self._base_url = f"https://api.telegram.org/bot{token}"
+
+    def __repr__(self) -> str:
+        return "TelegramClient(token=***)"
 
     def _request(self, method: str, payload: dict | None = None, *, timeout: int = 60) -> object:
         data = json.dumps(payload or {}).encode("utf-8")
         req = request.Request(
-            f"{self.base_url}/{method}",
+            f"{self._base_url}/{method}",
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -94,7 +97,7 @@ class TelegramClient:
         # 1. getFilePath
         result = self._request("getFile", {"file_id": file_id}, timeout=15)
         file_path = result["file_path"]  # type: ignore[index]
-        download_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+        download_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
 
         dest.parent.mkdir(parents=True, exist_ok=True)
         req = request.Request(download_url)
