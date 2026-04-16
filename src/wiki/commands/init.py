@@ -45,8 +45,8 @@ def run_init() -> None:
     if not git_dir.exists():
         subprocess.run(["git", "init"], cwd=cwd, check=True, capture_output=True)
 
-    # Initial commit
-    subprocess.run(["git", "add", "-A"], cwd=cwd, check=True, capture_output=True)
+    # Initial commit (stage only wiki scaffolding, not arbitrary files)
+    subprocess.run(["git", "add", "wiki/", ".gitignore"], cwd=cwd, check=True, capture_output=True)
     subprocess.run(
         ["git", "commit", "-m", "bootstrap: initial workspace"],
         cwd=cwd,

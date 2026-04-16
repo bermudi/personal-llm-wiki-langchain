@@ -13,7 +13,7 @@ from langchain_openai import OpenAIEmbeddings
 from wiki.config import build_embeddings, get_wiki_root
 
 if TYPE_CHECKING:
-    from wiki.observability import ObsStore
+    from wiki.observability import ObservableEmbeddings, ObsStore
 
 
 def _get_embeddings(obs_store: ObsStore | None = None, run_id: str = "") -> OpenAIEmbeddings | ObservableEmbeddings:

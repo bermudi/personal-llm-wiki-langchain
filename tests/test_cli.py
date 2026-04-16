@@ -1455,39 +1455,54 @@ def test_handle_attachment_mixed_files():
                 _wc._wiki_root = None
 
 
-if __name__ == "__main__":
-    print("Running wiki CLI tests...\n")
-    test_init_creates_structure()
-    test_init_idempotent()
-    test_wiki_detection()
-    test_filesystem_tools()
-    test_git_tools()
-    test_linter_middleware()
-    test_chunking_split()
-    test_chunk_review_graph()
-    test_chunk_review_graph_observability()
-    test_dotenv_loading()
-    test_dotenv_populates_os_environ()
-    test_dotenv_clobbers_existing()
-    test_dotenv_no_file_is_noop()
-    test_require_telegram_bot_token_from_file()
-    test_require_telegram_bot_token_from_env_fallback()
-    test_require_telegram_bot_token_missing_exits()
-    test_agent_construction()
-    test_observability_store()
-    test_observability_init_run()
-    test_observable_embeddings()
-    test_observable_embeddings_passthrough()
-    test_reindex_observability()
-    test_persistent_checkpointer_roundtrip()
-    test_telegram_state_store_and_rotation()
-    test_slash_commands_help_and_unknown()
-    test_slash_commands_status()
-    test_telegram_handle_update_slash_new()
-    test_split_telegram_text()
-    test_telegram_download_file()
-    test_build_ingest_prompt()
-    test_handle_attachment_downloads_and_ingests()
-    test_handle_attachment_binary_file_rejected()
-    test_handle_attachment_mixed_files()
-    print("\nAll tests passed!")
+def test_agent_invoke_with_mock_model():
+    """Verify create_wiki_agent returns a callable graph that processes a message."""
+    from unittest.mock import MagicMock, PropertyMock
+
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    tmp = fresh_wiki()
+    try:
+        # FakeChatModel that returns a fixed response regardless of input.
+        # Must support bind_tools() (returns self) and invoke() (returns AIMessage).
+        class FakeChatModel(BaseChatModel):
+            @property
+            def _llm_type(self) -> str:
+                return "fake"
+
+            def _generate(self, messages, *, stop=None, run_manager=None, **kwargs):
+                from langchain_core.outputs import ChatGeneration, ChatResult
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content="I read the wiki. Looks good!"))])
+
+            def bind_tools(self, tools, **kwargs):
+                return self
+
+        model = FakeChatModel()
+
+        from wiki.agent import create_wiki_agent
+
+        agent = create_wiki_agent(model=model)
+
+        result = agent.invoke({"messages": [HumanMessage(content="Read wiki/index.md and summarize it.")]})
+
+        # Result should contain messages
+        assert "messages" in result
+        messages = result["messages"]
+        assert len(messages) >= 2, f"Expected >= 2 messages (in + out), got {len(messages)}"
+
+        # First message should be our input
+        assert isinstance(messages[0], HumanMessage)
+
+        # The model should have produced an AIMessage
+        ai_messages = [m for m in messages if isinstance(m, AIMessage)]
+        assert len(ai_messages) >= 1, "Expected at least one AIMessage in output"
+
+        # The fake model's response should appear in the output
+        assert any("Looks good" in m.content for m in ai_messages if isinstance(m.content, str))
+
+        print("✓ test_agent_invoke_with_mock_model")
+    finally:
+        shutil.rmtree(tmp)
+
+
