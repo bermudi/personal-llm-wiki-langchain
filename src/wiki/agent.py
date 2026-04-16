@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from langchain.agents import create_agent
+from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.language_models import BaseChatModel
+from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from wiki.tools.chunking import review_long_source, split_source
 from wiki.tools.filesystem import edit_file, list_files, read_file, search_files, write_file
@@ -51,7 +58,7 @@ This keeps you grounded in the current state of the wiki.
 """
 
 
-def get_all_tools() -> list:
+def get_all_tools() -> list[BaseTool | Callable[..., Any]]:
     """Return the full tool inventory for the wiki agent."""
     return [
         # Filesystem
@@ -74,16 +81,16 @@ def get_all_tools() -> list:
 
 def create_wiki_agent(
     *,
-    model: object | None = None,
-    extra_tools: list | None = None,
-    checkpointer: object | None = None,
-    middleware: list | None = None,
+    model: BaseChatModel | None = None,
+    extra_tools: list[BaseTool | Callable[..., Any]] | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+    middleware: list[AgentMiddleware[Any, Any]] | None = None,
     system_prompt: str | None = None,
 ):
     """Create a wiki agent with all standard tools.
 
     Args:
-        model: ChatOpenAI instance. If None, built from config.
+        model: Chat model instance. If None, built from config.
         extra_tools: Additional tools beyond the standard set.
         checkpointer: Optional checkpointer for HITL / chat persistence.
         middleware: Optional middleware list (e.g., linter, HITL).
@@ -97,7 +104,7 @@ def create_wiki_agent(
     if extra_tools:
         tools.extend(extra_tools)
 
-    kwargs: dict = {
+    kwargs: dict[str, Any] = {
         "model": model,
         "tools": tools,
         "system_prompt": system_prompt or SYSTEM_PROMPT,

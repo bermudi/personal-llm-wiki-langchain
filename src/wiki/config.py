@@ -6,6 +6,7 @@ import os
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -29,23 +30,23 @@ def _load_dotenv_once() -> None:
         return
     _DOTENV_LOADED = True
 
-    env_path = Path.cwd() / ".wiki" / ".env"
+    env_path = get_wiki_root() / ".wiki" / ".env"
     if env_path.is_file():
         load_dotenv(env_path, override=True)
 
 
 # ── .wiki/config.toml (non-secret config) ───────────────────────────────
 
-_CONFIG: dict | None = None
+_CONFIG: dict[str, Any] | None = None
 
 
-def _load_config() -> dict:
+def _load_config() -> dict[str, Any]:
     """Load ``.wiki/config.toml`` if it exists. Cached per process."""
     global _CONFIG
     if _CONFIG is not None:
         return _CONFIG
 
-    config_path = Path.cwd() / ".wiki" / "config.toml"
+    config_path = get_wiki_root() / ".wiki" / "config.toml"
     if config_path.is_file():
         with open(config_path, "rb") as f:
             _CONFIG = tomllib.load(f)
@@ -57,7 +58,8 @@ def _load_config() -> dict:
 def _config_value(section: str, key: str, default: str | None = None) -> str | None:
     """Read a value from config.toml. Returns ``default`` if not set."""
     cfg = _load_config()
-    return cfg.get(section, {}).get(key, default)
+    val = cfg.get(section, {}).get(key, default)
+    return val if isinstance(val, str) else default
 
 
 # Required wiki directories
@@ -70,6 +72,32 @@ DEFAULT_REASONING_EFFORT = "low"
 
 DEFAULT_EMBED_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_EMBED_MODEL = "perplexity/pplx-embed-v1-4b"
+
+
+# ── Wiki root (cached once per process) ──────────────────────────────────
+
+_wiki_root: Path | None = None
+
+
+def set_wiki_root(path: Path) -> None:
+    """Set the wiki root directory explicitly.
+
+    Called by :func:`validate_wiki_dir` and in tests.
+    """
+    global _wiki_root
+    _wiki_root = path
+
+
+def get_wiki_root() -> Path:
+    """Return the wiki root directory.
+
+    Returns the cached value if :func:`set_wiki_root` or
+    :func:`validate_wiki_dir` has been called; otherwise falls back to
+    ``Path.cwd()``.
+    """
+    if _wiki_root is not None:
+        return _wiki_root
+    return Path.cwd()
 
 
 def require_chat_api_key() -> str:
@@ -109,19 +137,19 @@ def require_telegram_bot_token() -> str:
 
 
 def get_chat_base_url() -> str:
-    return os.environ.get("WIKI_CHAT_BASE_URL", _config_value("chat", "base_url", DEFAULT_CHAT_BASE_URL))  # type: ignore[return-value]
+    return os.environ.get("WIKI_CHAT_BASE_URL", _config_value("chat", "base_url", DEFAULT_CHAT_BASE_URL) or DEFAULT_CHAT_BASE_URL)
 
 
 def get_model_name() -> str:
-    return os.environ.get("WIKI_MODEL", _config_value("chat", "model", DEFAULT_CHAT_MODEL))  # type: ignore[return-value]
+    return os.environ.get("WIKI_MODEL", _config_value("chat", "model", DEFAULT_CHAT_MODEL) or DEFAULT_CHAT_MODEL)
 
 
 def get_embed_base_url() -> str:
-    return os.environ.get("WIKI_EMBED_BASE_URL", _config_value("embed", "base_url", DEFAULT_EMBED_BASE_URL))  # type: ignore[return-value]
+    return os.environ.get("WIKI_EMBED_BASE_URL", _config_value("embed", "base_url", DEFAULT_EMBED_BASE_URL) or DEFAULT_EMBED_BASE_URL)
 
 
 def get_embedding_model() -> str:
-    return os.environ.get("WIKI_EMBED_MODEL", _config_value("embed", "model", DEFAULT_EMBED_MODEL))  # type: ignore[return-value]
+    return os.environ.get("WIKI_EMBED_MODEL", _config_value("embed", "model", DEFAULT_EMBED_MODEL) or DEFAULT_EMBED_MODEL)
 
 
 def get_reasoning_effort() -> str | None:
@@ -162,7 +190,7 @@ def build_model() -> ChatOpenAI:
     model still uses the effort level internally.
     """
     use_responses = get_use_responses_api()
-    kwargs: dict = {
+    kwargs: dict[str, Any] = {
         "model": get_model_name(),
         "base_url": get_chat_base_url(),
         "api_key": require_chat_api_key(),
@@ -187,7 +215,11 @@ def build_embeddings() -> OpenAIEmbeddings:
 
 
 def validate_wiki_dir() -> Path:
-    """Validate that cwd is a wiki directory. Exit with error if not."""
+    """Validate that cwd is a wiki directory. Exit with error if not.
+
+    Caches the validated root so subsequent :func:`get_wiki_root` calls
+    return it without re-checking.
+    """
     cwd = Path.cwd()
     missing = [d for d in WIKI_DIRS if not (cwd / d).is_dir()]
     if missing:
@@ -196,4 +228,5 @@ def validate_wiki_dir() -> Path:
             file=sys.stderr,
         )
         raise SystemExit(1)
+    set_wiki_root(cwd)
     return cwd
