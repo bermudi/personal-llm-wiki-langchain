@@ -117,48 +117,65 @@ def create_linter_middleware():
         if not is_index and not is_log:
             return handler(request)
 
-        # For edit_file, we need to read the current content first (for append-only check on log)
-        original_content = ""
-        if tool_name == "edit_file" and is_log:
+        # --- Validate BEFORE writing to disk ---
+        # If validation fails, the file must never contain invalid state.
+
+        tc_id = request.tool_call.get("id") or ""
+
+        # Compute the content that WOULD be written so we can validate it first.
+        if tool_name == "write_file":
+            proposed_content = args.get("content", "")
+            original_content = ""
             try:
                 original_content = (get_wiki_root() / path).read_text(encoding="utf-8")
             except FileNotFoundError:
                 pass
+        elif tool_name == "edit_file":
+            # Apply the edit ourselves to get the proposed content
+            try:
+                original_content = (get_wiki_root() / path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                original_content = ""
 
-        # Execute the tool call — handler returns a ToolMessage (per wrap_tool_call contract)
-        result = handler(request)
+            old_text = args.get("old_text", "")
+            new_text = args.get("new_text", "")
+            count = original_content.count(old_text)
+            if count == 0:
+                return ToolMessage(
+                    content=f"VALIDATION ERROR: Text not found in {path}",
+                    tool_call_id=tc_id,
+                    name=tool_name,
+                )
+            if count > 1:
+                return ToolMessage(
+                    content=f"VALIDATION ERROR: Found {count} matches in {path}. Provide more context for a unique match.",
+                    tool_call_id=tc_id,
+                    name=tool_name,
+                )
+            proposed_content = original_content.replace(old_text, new_text)
+        else:
+            return handler(request)
 
-        # If the tool already returned an error, pass it through
-        if isinstance(result, ToolMessage) and isinstance(result.content, str) and result.content.startswith("Error:"):
-            return result
-
-        # Read the new content to validate
-        try:
-            new_content = (get_wiki_root() / path).read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return result
-
-        # Validate — return a ToolMessage with the error so the agent can self-correct
-        tc_id = request.tool_call.get("id")
-
+        # Validate the proposed content (never written to disk yet)
         if is_index:
-            error = validate_index(new_content)
+            error = validate_index(proposed_content)
             if error:
                 return ToolMessage(
                     content=f"VALIDATION ERROR: {error}",
-                    tool_call_id=tc_id or "",
+                    tool_call_id=tc_id,
                     name=tool_name,
                 )
 
         if is_log:
-            error = validate_log(new_content, original_content)
+            error = validate_log(proposed_content, original_content)
             if error:
                 return ToolMessage(
                     content=f"VALIDATION ERROR: {error}",
-                    tool_call_id=tc_id or "",
+                    tool_call_id=tc_id,
                     name=tool_name,
                 )
 
-        return result
+        # Validation passed — safe to write
+        return handler(request)
 
     return linter_middleware
