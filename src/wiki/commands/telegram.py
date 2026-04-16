@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import time
-from pathlib import Path
 
 from langchain_core.messages import AIMessage
 from rich.console import Console
@@ -19,6 +18,7 @@ from wiki.config import (
     get_model_name,
     get_reasoning_effort,
     get_use_responses_api,
+    get_wiki_root,
     require_telegram_bot_token,
     validate_wiki_dir,
 )
@@ -154,7 +154,7 @@ def _handle_update(
         text,
         SlashCommandContext(
             transport="telegram",
-            wiki_dir=Path.cwd(),
+            wiki_dir=get_wiki_root(),
             thread_id=session.active_thread_id,
             model_name=get_model_name(),
             chat_base_url=get_chat_base_url(),
@@ -268,7 +268,7 @@ def _handle_attachment(
 ) -> None:
     """Download file attachment(s) to raw/ and run an ingest turn."""
     chat_id = (message.get("chat") or {}).get("id")
-    raw_dir = Path.cwd() / "raw"
+    raw_dir = get_wiki_root() / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     downloaded_paths: list[str] = []
@@ -312,7 +312,7 @@ def _handle_attachment(
     rejected: list[str] = []
     for path in downloaded_paths:
         try:
-            (Path.cwd() / path).read_text(encoding="utf-8")
+            (get_wiki_root() / path).read_text(encoding="utf-8")
             valid_paths.append(path)
         except UnicodeDecodeError:
             rejected.append(path)
@@ -328,13 +328,13 @@ def _handle_attachment(
     # Build ingest prompt covering all valid files
     if len(valid_paths) == 1:
         source_path = valid_paths[0]
-        word_count = len((Path.cwd() / source_path).read_text(encoding="utf-8").split())
+        word_count = len((get_wiki_root() / source_path).read_text(encoding="utf-8").split())
         prompt = build_ingest_prompt(source_path, word_count)
     else:
         sources_info: list[str] = []
         total_words = 0
         for path in valid_paths:
-            content = (Path.cwd() / path).read_text(encoding="utf-8")
+            content = (get_wiki_root() / path).read_text(encoding="utf-8")
             wc = len(content.split())
             sources_info.append(f"- `{path}` ({wc} words)")
             total_words += wc

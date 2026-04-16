@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, ValidationError
 from typing_extensions import TypedDict
 
 from wiki.chunking_core import RawChunk, load_source_chunks
-from wiki.config import build_embeddings, build_model
+from wiki.config import build_embeddings, build_model, get_wiki_root
 from wiki.observability import ObsStore
 
 
@@ -821,12 +821,12 @@ def run_chunk_review_graph(
     is logged to SQLite for deep observability.  If omitted, the graph runs
     without telemetry (useful in tests).
     """
-    source = Path.cwd() / path
+    source = get_wiki_root() / path
     if not source.exists():
         raise FileNotFoundError(path)
 
     source_slug = source.stem
-    artifact_root = Path.cwd() / "scratch" / source_slug / "chunk-review"
+    artifact_root = get_wiki_root() / "scratch" / source_slug / "chunk-review"
     artifact_root.mkdir(parents=True, exist_ok=True)
 
     # Register the run in obs if a store was given

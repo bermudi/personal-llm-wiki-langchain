@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 from langchain_core.tools import tool
 
+from wiki.config import get_wiki_root
+
 
 def _git(*args: str) -> str:
-    """Run a git command in cwd and return stdout."""
+    """Run a git command in the wiki root and return stdout."""
     result = subprocess.run(
         ["git", *args],
         capture_output=True,
         text=True,
-        cwd=Path.cwd(),
+        cwd=get_wiki_root(),
     )
     return result.stdout.strip() if result.returncode == 0 else f"Error: {result.stderr.strip()}"
 
@@ -52,7 +53,7 @@ def git_commit(message: str) -> str:
         ["git", "commit", "-m", message],
         capture_output=True,
         text=True,
-        cwd=Path.cwd(),
+        cwd=get_wiki_root(),
     )
     if result.returncode == 0:
         return f"Committed: {message}"

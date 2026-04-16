@@ -10,7 +10,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 
-from wiki.config import build_embeddings
+from wiki.config import build_embeddings, get_wiki_root
 
 if TYPE_CHECKING:
     from wiki.observability import ObsStore
@@ -31,31 +31,44 @@ def _get_embeddings(obs_store: ObsStore | None = None, run_id: str = "") -> Open
 
 def _chroma_dir() -> Path:
     """Path to the Chroma persistence directory."""
-    return Path.cwd() / "wiki" / ".chroma"
+    return get_wiki_root() / "wiki" / ".chroma"
+
+
+_store_cache: Chroma | None = None
 
 
 def init_store(*, obs_store: ObsStore | None = None, run_id: str = "") -> Chroma:
-    """Initialize or load the Chroma vector store.
+    """Initialize or load the Chroma vector store (cached as a singleton).
+
+    The first call creates the ``Chroma`` instance; subsequent calls return
+    the same object.  Call :func:`_invalidate_store` to force recreation
+    (e.g. after ``reindex_all`` nukes the persistence directory).
 
     When *obs_store* is provided, all embedding operations (index, search)
     are logged to the SQLite observability store.
     """
+    global _store_cache
+    if _store_cache is not None:
+        return _store_cache
+
     chroma_dir = _chroma_dir()
     embeddings = _get_embeddings(obs_store=obs_store, run_id=run_id)
 
-    if chroma_dir.exists():
-        return Chroma(
-            persist_directory=str(chroma_dir),
-            embedding_function=embeddings,
-            collection_name="wiki-pages",
-        )
+    if not chroma_dir.exists():
+        chroma_dir.mkdir(parents=True, exist_ok=True)
 
-    chroma_dir.mkdir(parents=True, exist_ok=True)
-    return Chroma(
+    _store_cache = Chroma(
         persist_directory=str(chroma_dir),
         embedding_function=embeddings,
         collection_name="wiki-pages",
     )
+    return _store_cache
+
+
+def _invalidate_store() -> None:
+    """Drop the cached Chroma instance so the next call recreates it."""
+    global _store_cache
+    _store_cache = None
 
 
 def index_page(path: str, content: str, *, obs_store: ObsStore | None = None, run_id: str = "") -> None:
@@ -117,8 +130,9 @@ def reindex_all(*, obs_store: ObsStore | None = None, run_id: str = "") -> int:
     if chroma_dir.exists():
         shutil.rmtree(chroma_dir)
 
+    _invalidate_store()
     store = init_store(obs_store=obs_store, run_id=run_id)
-    wiki_dir = Path.cwd() / "wiki"
+    wiki_dir = get_wiki_root() / "wiki"
 
     docs: list[Document] = []
     for md_file in sorted(wiki_dir.glob("*.md")):

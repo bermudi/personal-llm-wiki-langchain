@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from wiki.agent import SYSTEM_PROMPT, create_wiki_agent
-from wiki.config import get_model_name, validate_wiki_dir
+from wiki.config import get_model_name, get_wiki_root, validate_wiki_dir
 from wiki.middleware.linter import create_linter_middleware
 from wiki.observability import create_observability_middleware, init_run
 from wiki.streaming import stream_agent_response
@@ -36,7 +36,7 @@ LONG_SOURCE_WORD_THRESHOLD = 70_000  # ~100k tokens
 
 def build_ingest_prompt(path: str, word_count: int) -> str:
     """Build a short-source ingest prompt by reading the file from disk."""
-    content = (Path.cwd() / path).read_text(encoding="utf-8")
+    content = (get_wiki_root() / path).read_text(encoding="utf-8")
     return _build_short_prompt(path, content, word_count)
 
 

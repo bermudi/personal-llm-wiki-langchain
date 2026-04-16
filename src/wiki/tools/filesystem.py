@@ -7,12 +7,13 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from wiki.config import get_wiki_root
 from wiki.tools.git import _git
 
 
 def _resolve(path: str) -> Path:
     """Resolve a path relative to cwd."""
-    return Path.cwd() / path
+    return get_wiki_root() / path
 
 
 @tool
@@ -118,7 +119,7 @@ def search_files(pattern: str) -> str:
             ["rg", "--no-heading", "-n", "--max-count", "50", pattern, "."],
             capture_output=True,
             text=True,
-            cwd=Path.cwd(),
+            cwd=get_wiki_root(),
         )
         if result.returncode == 0:
             output = result.stdout.strip()
@@ -134,13 +135,13 @@ def search_files(pattern: str) -> str:
         except re.error as e:
             return f"Error: Invalid regex: {e}"
 
-        for md_file in Path.cwd().rglob("*.md"):
+        for md_file in get_wiki_root().rglob("*.md"):
             if ".git" in md_file.parts or ".chroma" in md_file.parts:
                 continue
             try:
                 for i, line in enumerate(md_file.read_text(encoding="utf-8").splitlines(), 1):
                     if regex.search(line):
-                        rel = md_file.relative_to(Path.cwd())
+                        rel = md_file.relative_to(get_wiki_root())
                         matches.append(f"{rel}:{i}:{line.strip()}")
                         if len(matches) >= 50:
                             break

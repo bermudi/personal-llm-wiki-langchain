@@ -858,8 +858,7 @@ def test_dotenv_loading():
 
         # Patch cwd so config finds .wiki/.env
         import wiki.config
-        orig_cwd = Path.cwd
-        wiki.config.Path.cwd = lambda: Path(tmp)  # type: ignore[attr-defined]
+        wiki.config.set_wiki_root(Path(tmp))
         wiki.config._DOTENV_LOADED = False
 
         try:
@@ -872,7 +871,7 @@ def test_dotenv_loading():
             os.environ.pop("TELEGRAM_BOT_TOKEN", None)
             os.environ.pop("POE_API_KEY", None)
             os.environ.pop("OPENROUTER_API_KEY", None)
-            wiki.config.Path.cwd = orig_cwd  # type: ignore[attr-defined]
+            wiki.config._wiki_root = None
 
 
 def _reset_dotenv():
@@ -895,7 +894,7 @@ def test_dotenv_populates_os_environ():
         env_file.write_text("TELEGRAM_BOT_TOKEN=file-token\nPOE_API_KEY=file-key\n")
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+            with patch("wiki.config.get_wiki_root", return_value=wiki_dir):
                 _reset_dotenv()
                 from wiki.config import _load_dotenv_once
                 _load_dotenv_once()
@@ -919,7 +918,7 @@ def test_dotenv_clobbers_existing():
         env_file.write_text("TELEGRAM_BOT_TOKEN=from-file\n")
 
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "from-shell"}, clear=True):
-            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+            with patch("wiki.config.get_wiki_root", return_value=wiki_dir):
                 _reset_dotenv()
                 from wiki.config import _load_dotenv_once
                 _load_dotenv_once()
@@ -939,7 +938,7 @@ def test_dotenv_no_file_is_noop():
         wiki_dir = Path(tmp)
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+            with patch("wiki.config.get_wiki_root", return_value=wiki_dir):
                 _reset_dotenv()
                 from wiki.config import _load_dotenv_once
                 _load_dotenv_once()  # should not raise
@@ -964,7 +963,7 @@ def test_require_telegram_bot_token_from_file():
         env_file.write_text("TELEGRAM_BOT_TOKEN=tok-from-file\n")
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+            with patch("wiki.config.get_wiki_root", return_value=wiki_dir):
                 _reset_dotenv()
 
                 token = require_telegram_bot_token()
@@ -985,7 +984,7 @@ def test_require_telegram_bot_token_from_env_fallback():
         wiki_dir = Path(tmp)
 
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "tok-from-env"}, clear=True):
-            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+            with patch("wiki.config.get_wiki_root", return_value=wiki_dir):
                 _reset_dotenv()
 
                 token = require_telegram_bot_token()
@@ -1006,7 +1005,7 @@ def test_require_telegram_bot_token_missing_exits():
         wiki_dir = Path(tmp)
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.config.Path.cwd", return_value=wiki_dir):
+            with patch("wiki.config.get_wiki_root", return_value=wiki_dir):
                 _reset_dotenv()
 
                 try:
@@ -1158,19 +1157,18 @@ def test_telegram_handle_update_slash_new():
         }
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki_dir):
-                with patch("wiki.commands.telegram._run_agent_turn") as mock_turn:
-                    from wiki.commands.telegram import _handle_update
+            with patch("wiki.commands.telegram._run_agent_turn") as mock_turn:
+                from wiki.commands.telegram import _handle_update
 
-                    _handle_update(update, client, state_store, MagicMock(), MagicMock())
+                _handle_update(update, client, state_store, MagicMock(), MagicMock())
 
-                    mock_turn.assert_not_called()
-                    state_store.rotate_session.assert_called_once_with(42, reason="slash-command")
-                    sent = client.send_messages.call_args[0][1]
-                    assert "Started a fresh conversation thread" in sent
-                    assert "Epoch: 2" in sent
-                    assert "Thread: telegram:42:epoch:2" in sent
-                    print("✓ test_telegram_handle_update_slash_new")
+                mock_turn.assert_not_called()
+                state_store.rotate_session.assert_called_once_with(42, reason="slash-command")
+                sent = client.send_messages.call_args[0][1]
+                assert "Started a fresh conversation thread" in sent
+                assert "Epoch: 2" in sent
+                assert "Thread: telegram:42:epoch:2" in sent
+                print("✓ test_telegram_handle_update_slash_new")
 
 
 def test_split_telegram_text():
@@ -1305,8 +1303,9 @@ def test_handle_attachment_downloads_and_ingests():
 
         # Patch cwd to our temp wiki
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki):
-                # Patch _run_ingest_turn to avoid needing a real LLM
+            import wiki.config as _wc
+            _wc.set_wiki_root(wiki)
+            try:
                 with patch("wiki.commands.telegram._run_ingest_turn", return_value="Plan: create 2 pages.") as mock_ingest:
                     from wiki.commands.telegram import _handle_attachment
 
@@ -1335,6 +1334,8 @@ def test_handle_attachment_downloads_and_ingests():
                     assert any("Plan: create 2 pages." in s for s in sent)
 
                     print("✓ test_handle_attachment_downloads_and_ingests")
+            finally:
+                _wc._wiki_root = None
 
 
 def test_handle_attachment_binary_file_rejected():
@@ -1364,7 +1365,9 @@ def test_handle_attachment_binary_file_rejected():
         mock_model = MagicMock()
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki):
+            import wiki.config as _wc
+            _wc.set_wiki_root(wiki)
+            try:
                 from wiki.commands.telegram import _handle_attachment
 
                 _handle_attachment(
@@ -1382,6 +1385,8 @@ def test_handle_attachment_binary_file_rejected():
                 # Should get a rejection about non-text file
                 assert any("not a text file" in s.lower() or "non-text" in s.lower() for s in sent)
                 print("✓ test_handle_attachment_binary_file_rejected")
+            finally:
+                _wc._wiki_root = None
 
 
 def test_handle_attachment_mixed_files():
@@ -1418,7 +1423,9 @@ def test_handle_attachment_mixed_files():
         mock_model = MagicMock()
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("wiki.commands.telegram.Path.cwd", return_value=wiki):
+            import wiki.config as _wc
+            _wc.set_wiki_root(wiki)
+            try:
                 with patch("wiki.commands.telegram._run_ingest_turn", return_value="Plan: 1 page.") as mock_ingest:
                     from wiki.commands.telegram import _handle_attachment
 
@@ -1444,6 +1451,8 @@ def test_handle_attachment_mixed_files():
                     # Binary was skipped — rejection message sent
                     assert any("non-text" in s.lower() for s in sent)
                     print("✓ test_handle_attachment_mixed_files")
+            finally:
+                _wc._wiki_root = None
 
 
 if __name__ == "__main__":

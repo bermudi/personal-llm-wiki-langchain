@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from wiki.config import get_wiki_root
+
 
 class RawChunk(BaseModel):
     """A mechanically derived source chunk."""
@@ -133,8 +135,8 @@ def split_source_text(*, content: str, source_path: str, chunk_size: int) -> tup
 
 
 def load_source_chunks(path: str, chunk_size: int) -> tuple[Path, list[RawChunk], str, int]:
-    """Read a source file from cwd and split it into raw chunks."""
-    source_path = Path.cwd() / path
+    """Read a source file from the wiki root and split it into raw chunks."""
+    source_path = get_wiki_root() / path
     if not source_path.exists():
         raise FileNotFoundError(path)
 

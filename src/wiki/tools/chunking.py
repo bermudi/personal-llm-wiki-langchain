@@ -7,6 +7,7 @@ from pathlib import Path
 from langchain_core.tools import tool
 
 from wiki.chunking_core import load_source_chunks
+from wiki.config import get_wiki_root
 from wiki.ingest_graph import run_chunk_review_graph
 from wiki.tools.git import _git
 
@@ -34,7 +35,7 @@ def split_source(path: str, chunk_size: int = 5000) -> str:
     if total_words <= chunk_size:
         return f"Source is only {total_words} words — no chunking needed. Process directly."
 
-    chunk_dir = Path.cwd() / "scratch" / source_path.stem
+    chunk_dir = get_wiki_root() / "scratch" / source_path.stem
     chunk_dir.mkdir(parents=True, exist_ok=True)
 
     chunk_paths: list[str] = []

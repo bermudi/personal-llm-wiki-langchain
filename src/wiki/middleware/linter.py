@@ -8,6 +8,8 @@ from pathlib import Path
 from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 
+from wiki.config import get_wiki_root
+
 
 def validate_index(content: str) -> str | None:
     """Validate wiki/index.md format. Returns error message or None if valid."""
@@ -119,7 +121,7 @@ def create_linter_middleware():
         original_content = ""
         if tool_name == "edit_file" and is_log:
             try:
-                original_content = (Path.cwd() / path).read_text(encoding="utf-8")
+                original_content = (get_wiki_root() / path).read_text(encoding="utf-8")
             except FileNotFoundError:
                 pass
 
@@ -132,7 +134,7 @@ def create_linter_middleware():
 
         # Read the new content to validate
         try:
-            new_content = (Path.cwd() / path).read_text(encoding="utf-8")
+            new_content = (get_wiki_root() / path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return result
 

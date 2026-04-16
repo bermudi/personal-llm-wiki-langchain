@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from wiki.config import WIKI_DIRS
+from wiki.config import WIKI_DIRS, get_wiki_root
 
 
 def run_init() -> None:
-    cwd = Path.cwd()
+    cwd = get_wiki_root()
     missing = [d for d in WIKI_DIRS if not (cwd / d).is_dir()]
 
     if not missing:

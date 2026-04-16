@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import time
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.console import Group
@@ -33,67 +32,15 @@ from textual.containers import VerticalScroll, Horizontal
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Input, Static
 
-from wiki.config import get_chat_base_url, get_reasoning_effort, get_use_responses_api
+from wiki.config import get_chat_base_url, get_reasoning_effort, get_use_responses_api, get_wiki_root
 from wiki.slash_commands import SlashCommandContext, SlashCommandResult, build_chat_slash_registry
+from wiki.streaming import _extract_thinking, _extract_content, _extract_tool_call
 
 if TYPE_CHECKING:
     pass
 
 
-# ── Stream parsing (shared logic with streaming.py) ─────────────────────
-
-
-def _extract_thinking(chunk: object) -> str | None:
-    """Extract reasoning/thinking text from a streaming chunk."""
-    rc = getattr(chunk, "additional_kwargs", {}).get("reasoning_content")
-    if rc and isinstance(rc, str):
-        return rc or None
-
-    content = getattr(chunk, "content", None)
-    if not isinstance(content, list):
-        return None
-
-    parts: list[str] = []
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "reasoning" and "summary" in block:
-            for s in block["summary"]:
-                if isinstance(s, dict) and s.get("text"):
-                    parts.append(s["text"])
-        elif block.get("type") == "reasoning_content":
-            text = block.get("text", "")
-            if text:
-                parts.append(text)
-    return "".join(parts) if parts else None
-
-
-def _extract_content(chunk: object) -> str | None:
-    """Extract normal text content from a streaming chunk."""
-    content = getattr(chunk, "content", None)
-    if isinstance(content, str):
-        return content or None
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                text = block.get("text", "")
-                if text:
-                    parts.append(text)
-        return "".join(parts) if parts else None
-    return None
-
-
-def _extract_tool_call(chunk: object) -> str | None:
-    """Extract tool call name from a streaming chunk (returns name or None)."""
-    tc_chunks = getattr(chunk, "tool_call_chunks", None)
-    if tc_chunks:
-        tc = tc_chunks[-1]
-        if isinstance(tc, dict) and tc.get("name"):
-            return tc["name"]
-    return None
+# ── Stream parsing ─────────────────────────────────────────────────────
 
 
 def iter_stream(event_stream: object):
@@ -123,10 +70,12 @@ def iter_stream(event_stream: object):
             yield "content", text
             continue
 
-        tool = _extract_tool_call(chunk)
-        if tool and tool != current_tool:
-            current_tool = tool
-            yield "tool", tool
+        tool_info = _extract_tool_call(chunk)
+        if tool_info:
+            tool_name = tool_info["name"]
+            if tool_name != current_tool:
+                current_tool = tool_name
+                yield "tool", tool_name
 
 
 # ── TUI App ─────────────────────────────────────────────────────────────
@@ -351,7 +300,7 @@ class WikiReplApp(App):
         help_footer = "Type normal text to chat with the wiki agent."
         return SlashCommandContext(
             transport="chat",
-            wiki_dir=Path.cwd(),
+            wiki_dir=get_wiki_root(),
             thread_id=str(thread_id),
             model_name=self.model_name,
             chat_base_url=get_chat_base_url(),
