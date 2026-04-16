@@ -78,6 +78,7 @@ def create_wiki_agent(
     extra_tools: list | None = None,
     checkpointer: object | None = None,
     middleware: list | None = None,
+    system_prompt: str | None = None,
 ):
     """Create a wiki agent with all standard tools.
 
@@ -99,7 +100,7 @@ def create_wiki_agent(
     kwargs: dict = {
         "model": model,
         "tools": tools,
-        "system_prompt": SYSTEM_PROMPT,
+        "system_prompt": system_prompt or SYSTEM_PROMPT,
     }
 
     if checkpointer is not None:

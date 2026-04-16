@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from rich.console import Console
 from rich.panel import Panel
 
-from wiki.agent import create_wiki_agent
+from wiki.agent import SYSTEM_PROMPT, create_wiki_agent
 from wiki.config import get_model_name, validate_wiki_dir
 from wiki.middleware.linter import create_linter_middleware
 from wiki.observability import create_observability_middleware, init_run
@@ -152,6 +152,7 @@ def run_ingest(path: str, *, no_tui: bool = False) -> None:
     checkpointer = MemorySaver()
     agent = create_wiki_agent(
         checkpointer=checkpointer,
+        system_prompt=SYSTEM_PROMPT + SYSTEM_SUFFIX,
         middleware=[
             create_linter_middleware(),
             *obs_middleware,
@@ -164,7 +165,6 @@ def run_ingest(path: str, *, no_tui: bool = False) -> None:
     }
 
     initial_messages: list[dict] = [
-        {"role": "system", "content": SYSTEM_SUFFIX},
         {"role": "user", "content": user_prompt},
     ]
 

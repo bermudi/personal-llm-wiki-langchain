@@ -368,7 +368,7 @@ def _handle_attachment(
 
 
 def _run_ingest_turn(*, prompt: str, thread_id: str, checkpointer: PersistentCheckpointer, model: object) -> str:
-    """Run an ingest-mode agent turn with the ingest system suffix prepended."""
+    """Run an ingest-mode agent turn with the ingest system suffix appended."""
     combined_system = SYSTEM_PROMPT + INGEST_SYSTEM_SUFFIX
 
     store, run_id = init_run("telegram-ingest", thread_id)
@@ -376,6 +376,7 @@ def _run_ingest_turn(*, prompt: str, thread_id: str, checkpointer: PersistentChe
     agent = create_wiki_agent(
         model=model,
         checkpointer=checkpointer.saver,
+        system_prompt=combined_system,
         middleware=[
             create_linter_middleware(),
             *obs_middleware,
@@ -389,7 +390,6 @@ def _run_ingest_turn(*, prompt: str, thread_id: str, checkpointer: PersistentChe
     try:
         agent.invoke(
             {"messages": [
-                {"role": "system", "content": combined_system},
                 {"role": "user", "content": prompt},
             ]},
             config=config,
