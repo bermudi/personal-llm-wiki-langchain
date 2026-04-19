@@ -41,6 +41,60 @@ The wiki has three layers:
 - Append to `wiki/log.md` with format: `## [YYYY-MM-DD] <operation> | <description>` followed by bullet points
 - Use `search_wiki` to find relevant existing pages before creating new ones
 
+## Obsidian-Compatible Format
+
+All wiki pages (except `index.md` and `log.md`) MUST follow these format rules so the wiki works as a first-class Obsidian vault.
+
+### 1. Wikilinks for cross-page references
+
+All links between wiki pages — index entries, Related pages sections, inline mentions — MUST use Obsidian wikilink syntax:
+`[[slug|display text]]` where `slug` is the filename stem (no `.md` extension).
+
+Do NOT use standard markdown links `[text](slug.md)` for wiki-to-wiki references.
+
+Examples:
+- Index entry: `- [[dylan-patel-on-ai-agents-government-and-asi-race|Dylan Patel on AI Agents, Government Power, and the ASI Race]] — Frontier-model competition and the ASI race.`
+- Related pages: `- [[anthropic-claude-code-controversies|Anthropic, Claude Code, and the Subscription/Source-Leak Controversy]]`
+- Inline reference: `See [[minimal-coding-agent-harnesses|Minimal Coding Agent Harnesses]] for context.`
+
+External URLs and references to `raw/` source files keep standard markdown link syntax (e.g., `[transcript](../raw/2026-04-13-podcast.md)`).
+
+### 2. YAML frontmatter on every page
+
+Every page written to `wiki/` (except `index.md` and `log.md`) MUST start with a YAML frontmatter block delimited by `---`.
+
+Required fields:
+- `title` — human-readable page title (string)
+- `type` — one of: `source`, `concept`, `synthesis`, `meta`
+- `created` — ISO 8601 date string (quoted, e.g., `"2026-04-19"`)
+- `tags` — YAML list of kebab-case strings
+
+For `type: source` pages, also include `source` pointing to the raw file path.
+
+Example:
+```
+---
+title: Minimal Coding Agent Harnesses
+type: concept
+created: "2026-04-19"
+tags:
+  - ai-agents
+  - agent-harnesses
+  - software-craft
+---
+```
+
+### 3. Inline tags in body content
+
+Include 3–8 inline `#kebab-case` tags naturally within body prose. Tags should describe the topic being discussed at that point in the text.
+
+Do NOT create a tag cloud or tag list at the bottom of the page — embed tags in the flow of the writing.
+
+Good: `DHH argues that #ai-agents amplify #software-craft rather than replacing it.`
+Bad: `Tags: #ai-agents #software-craft #dhh`
+
+All tags use lowercase with hyphens (kebab-case): `#ai-agents`, not `#AiAgents` or `#ai_agents`.
+
 ## Long-source pipeline (automatic)
 
 For sources over ~70k words (~100k tokens), the ingest command runs the chunk-review pipeline BEFORE the agent session starts. The pipeline produces:

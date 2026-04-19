@@ -1,14 +1,17 @@
-"""Index and log format validation middleware."""
+"""Index, log, and frontmatter validation middleware."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
+import yaml
 from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 
 from wiki.config import get_wiki_root
+
+VALID_PAGE_TYPES = {"source", "concept", "synthesis", "meta"}
 
 
 def validate_index(content: str) -> str | None:
@@ -98,8 +101,71 @@ def validate_log(content: str, original_content: str) -> str | None:
     return None
 
 
+def validate_frontmatter(content: str, path: str) -> str | None:
+    """Validate YAML frontmatter on wiki pages. Returns error message or None if valid.
+
+    Expected frontmatter structure:
+        ---
+        title: Page Title
+        type: source|concept|synthesis|meta
+        created: "2026-04-19"
+        tags:
+          - tag-one
+          - tag-two
+        ---
+    """
+    # Extract YAML block between opening and closing ---
+    if not content.startswith("---"):
+        return f"VALIDATION ERROR: {path} must include YAML frontmatter with title, type, created, and tags"
+
+    # Find closing ---
+    rest = content[3:]
+    # Skip optional newline after opening ---
+    if rest.startswith("\n"):
+        rest = rest[1:]
+    elif rest.startswith("\r\n"):
+        rest = rest[2:]
+
+    close_idx = rest.find("\n---")
+    if close_idx == -1:
+        # Try \r\n
+        close_idx = rest.find("\r\n---")
+    if close_idx == -1:
+        return f"VALIDATION ERROR: {path} must include YAML frontmatter with title, type, created, and tags"
+
+    yaml_block = rest[:close_idx]
+
+    try:
+        fm = yaml.safe_load(yaml_block)
+    except yaml.YAMLError:
+        return f"VALIDATION ERROR: {path} has malformed YAML frontmatter"
+
+    if not isinstance(fm, dict):
+        return f"VALIDATION ERROR: {path} must include YAML frontmatter with title, type, created, and tags"
+
+    # Check required fields
+    required_fields = ["title", "type", "created", "tags"]
+    missing = [f for f in required_fields if f not in fm]
+    if missing:
+        return f"VALIDATION ERROR: {path} is missing frontmatter fields: {', '.join(missing)}"
+
+    # Validate title is non-empty string
+    if not isinstance(fm["title"], str) or not fm["title"].strip():
+        return f"VALIDATION ERROR: {path} frontmatter 'title' must be a non-empty string"
+
+    # Validate type is in allowed set
+    if fm["type"] not in VALID_PAGE_TYPES:
+        return f"VALIDATION ERROR: type must be one of: {', '.join(sorted(VALID_PAGE_TYPES))}"
+
+    # Validate tags is a non-empty list
+    if not isinstance(fm["tags"], list) or len(fm["tags"]) == 0:
+        return f"VALIDATION ERROR: {path} frontmatter 'tags' must be a non-empty list"
+
+    return None
+
+
 def create_linter_middleware():
-    """Create middleware that validates index.md and log.md on write/edit."""
+    """Create middleware that validates index.md, log.md, and page frontmatter on write/edit."""
 
     @wrap_tool_call
     def linter_middleware(request, handler):
@@ -114,7 +180,14 @@ def create_linter_middleware():
         is_index = path.rstrip("/") == "wiki/index.md"
         is_log = path.rstrip("/") == "wiki/log.md"
 
-        if not is_index and not is_log:
+        is_wiki_page = (
+            path.rstrip("/").startswith("wiki/")
+            and path.rstrip("/").endswith(".md")
+            and not is_index
+            and not is_log
+        )
+
+        if not is_index and not is_log and not is_wiki_page:
             return handler(request)
 
         # --- Validate BEFORE writing to disk ---
@@ -171,6 +244,15 @@ def create_linter_middleware():
             if error:
                 return ToolMessage(
                     content=f"VALIDATION ERROR: {error}",
+                    tool_call_id=tc_id,
+                    name=tool_name,
+                )
+
+        if is_wiki_page:
+            error = validate_frontmatter(proposed_content, path)
+            if error:
+                return ToolMessage(
+                    content=error,  # error already includes VALIDATION ERROR prefix
                     tool_call_id=tc_id,
                     name=tool_name,
                 )
