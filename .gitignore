@@ -5,10 +5,7 @@
 .venv/
 
 # Wiki runtime
-.obsidian/
-wiki/.chroma/
-.wiki/secrets.env
-.wiki/.env
+test-wiki/
 
 # Embeddings (derived)
 *.egg-info/
